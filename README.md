@@ -100,3 +100,31 @@ cmake --build build
 
 `GUAYABA_CONSUMER_MODE` acepta `add_subdirectory`, `FetchContent` o `find_package`
 (este ultimo necesita `CMAKE_PREFIX_PATH` apuntando al motor instalado).
+
+## IntelliSense en VSCode
+
+Si al abrir `#include <guayaba/Guayaba.hpp>` aparece *Include errors detected*
+(`C/C++(1696)`), **no es un fallo del codigo**: es que el editor no sabe donde esta
+la carpeta `include/`. Los includes con `<>` necesitan que `include/` sea una raiz de
+busqueda, algo que CMake configura solo y el editor no lee por su cuenta.
+
+La solucion es la base de datos de compilacion, que CMake genera:
+
+```bash
+cmake -S . -B build
+cmake --build build
+cmake -S examples/consumer -B build/consumer -DGUAYABA_CONSUMER_MODE=add_subdirectory
+cmake --build build/consumer
+```
+
+Con eso, `cpptools` detecta `build/compile_commands.json` y `build/consumer/compile_commands.json`
+por su cuenta. Si tu version no los busca en subdirectorios, crea un enlace:
+
+```bash
+ln -sf build/compile_commands.json compile_commands.json
+```
+
+Nota para Windows: `compile_commands.json` solo se genera con los generadores
+Makefile o Ninja. El generador Visual Studio (el default de `cmake-gui.exe`) no lo
+produce; en ese caso hay que configurar con `-G Ninja` o anadir a mano
+`.vscode/c_cpp_properties.json` con `includePath` apuntando a `include/`.

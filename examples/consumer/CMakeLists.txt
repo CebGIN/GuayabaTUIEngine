@@ -5,6 +5,12 @@ project(GuayabaConsumer LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Compilation database for IntelliSense. Same guard as in the engine: only when
+# this project is the top-level one.
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+endif()
+
 # Modo de consumo del motor. Los tres deben producir el mismo binario.
 #   add_subdirectory  -> cmake -DGUAYABA_CONSUMER_MODE=add_subdirectory
 #   FetchContent      -> cmake -DGUAYABA_CONSUMER_MODE=FetchContent

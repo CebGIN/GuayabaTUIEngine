@@ -11,6 +11,16 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Compilation database for IntelliSense (cpptools, CLion, clangd, vim).
+# Only when this project is the top-level one: the variable applies to the whole
+# build tree, so enabling it unconditionally would hand a compile_commands.json
+# to any project that includes us via add_subdirectory().
+# Note: requires the Makefile or Ninja generator. The Visual Studio generator
+# on Windows does not produce one.
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+endif()
+
 # --- Seleccion del backend de plataforma -----------------------------------------
 # Solo se compila el backend del sistema actual. Los .cpp descartados tambien
 # estan protegidos con #ifdef, asi que la exclusion aqui es solo de higiene.
