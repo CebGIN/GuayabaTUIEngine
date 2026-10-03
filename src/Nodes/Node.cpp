@@ -1,10 +1,11 @@
+#include <guayaba/Core/Script.hpp>
 #include <guayaba/Nodes/Node.hpp>
 
 namespace guayaba {
 
 void Node::enter_tree() {
     in_tree = true;
-    at_enter_tree();
+    if (script) script->on_enter_tree();
     for (const auto& child : children) {
         child->enter_tree();
     }
@@ -14,13 +15,11 @@ void Node::exit_tree() {
     for (const auto& child : children) {
         child->exit_tree();
     }
-    at_exit_tree();
+    if (script) script->on_exit_tree();
     in_tree = false;
 }
 
-Node::Node(const std::string& node_name) : name(node_name) {
-    process = [](double){}; at_enter_tree = [](){}; at_exit_tree = [](){};
-}
+Node::Node(const std::string& node_name) : name(node_name) {}
 
 Node::~Node() {}
 
@@ -73,31 +72,45 @@ NodeType Node::get_type() const {
 }
 
 void Node::update(double delta_time) {
-    process(delta_time);
+    if (script) script->on_process(delta_time);
     for (const auto& child : children) {
         child->update(delta_time);
     }
 }
 
-void Node::set_process_function(std::function<void(double)> func) {
-    if (func) { process = func; }
-    else { process = [](double){}; }
-}
-
-void Node::set_at_enter_function(std::function<void()> func) {
-    if (func) { at_enter_tree = func; }
-    else { at_enter_tree = [](){}; }
-}
-
-void Node::set_at_exit_function(std::function<void()> func) {
-    if (func) { at_exit_tree = func; }
-    else { at_exit_tree = [](){}; }
-}
-
 void Node::draw(ConsoleRenderer& renderer) {
+    // The script draws here, ahead of the children, so that a child's on_draw
+    // stays a true overlay instead of being buried under the parent's.
+    if (script) script->on_draw(renderer);
     for (const auto& child : children) {
         child->draw(renderer);
     }
+}
+
+void Node::attach_script(std::shared_ptr<Script> new_script) {
+    if (!new_script) return;
+
+    // A bound script is never stolen from its host, and re-attaching to the very
+    // same node is a no-op as well: bind_to() set owner on the first attach.
+    std::shared_ptr<Node> bound_to = new_script->owner.lock();
+    if (bound_to) return;
+
+    if (script) {
+        script->on_detached();
+        script->unbind();
+        script.reset();
+    }
+
+    script = std::move(new_script);
+    script->bind_to(shared_from_this());
+    script->on_attached();
+}
+
+void Node::detach_script() {
+    if (!script) return;
+    script->on_detached();
+    script->unbind();
+    script.reset();
 }
 
 void Node::invalidate_cache_recursively(){

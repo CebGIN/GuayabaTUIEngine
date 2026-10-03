@@ -1,7 +1,6 @@
 #ifndef GUAYABA_NODES_NODE_HPP
 #define GUAYABA_NODES_NODE_HPP
 
-#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -14,6 +13,7 @@ namespace guayaba {
 
 class SceneManager;
 class ConsoleRenderer;
+class Script;
 
 class Node : public std::enable_shared_from_this<Node>{
     friend class SceneManager;
@@ -21,9 +21,9 @@ protected:
     std::vector<std::shared_ptr<Node>> children;
     std::weak_ptr<Node> parent;
     std::string name;
-    std::function<void(double)> process;
-    std::function<void()> at_enter_tree;
-    std::function<void()> at_exit_tree;
+
+    // Optional behaviour attached from outside.
+    std::shared_ptr<Script> script;
 
     mutable bool in_tree = false;
 
@@ -73,13 +73,32 @@ public:
 
     virtual NodeType get_type() const;
 
+    // An override that fails to delegate to the base implementation silently
+    // disables the attached script for that node type. Every override of update
+    // and draw MUST end with Node::update(...) / Node::draw(...).
     virtual void update(double delta_time);
 
-    void set_process_function(std::function<void(double)> func);
+    bool is_in_tree() const { return in_tree; }
 
-    void set_at_enter_function(std::function<void()> func);
+    // At most one script per node. Attaching a null script, or one that is
+    // already bound to any node, is a silent no-op. Replacing this node's own
+    // script fires on_detached on the old one, never on_exit_tree.
+    // Requires the node to be owned by a shared_ptr.
+    void attach_script(std::shared_ptr<Script> new_script);
 
-    void set_at_exit_function(std::function<void()> func);
+    void detach_script();
+
+    bool has_script() const { return static_cast<bool>(script); }
+
+    std::shared_ptr<Script> get_script() const { return script; }
+
+    // Rarely needed: you usually kept your own reference when attaching. This is
+    // for when you hold nothing but the node. Returns nullptr on a type mismatch.
+    template<typename T>
+    std::shared_ptr<T> get_script_as() const {
+        static_assert(std::is_base_of<Script, T>::value, "T must be a Script type.");
+        return std::dynamic_pointer_cast<T>(script);
+    }
 
     virtual void draw(ConsoleRenderer& renderer);
 

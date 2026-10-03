@@ -20,6 +20,7 @@
 #include <guayaba/Core/Color.hpp>
 #include <guayaba/Core/Input.hpp>
 #include <guayaba/Core/NodeType.hpp>
+#include <guayaba/Core/Script.hpp>
 #include <guayaba/Core/TermChar.hpp>
 #include <guayaba/Core/Vec2.hpp>
 #include <guayaba/Nodes/Node.hpp>
