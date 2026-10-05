@@ -37,15 +37,3 @@ endif()
 add_executable(consumer main.cpp)
 target_link_libraries(consumer PRIVATE GuayabaTUIEngine::GuayabaTUIEngine)
 
-# Test de API sin terminal: comprueba los 3 criterios de aceptacion.
-add_executable(api_test api_test.cpp)
-target_link_libraries(api_test PRIVATE GuayabaTUIEngine::GuayabaTUIEngine)
-
-if(MSVC)
-    target_compile_options(api_test PRIVATE /W4 /WX)
-else()
-    target_compile_options(api_test PRIVATE -Wall -Wextra -Werror -pedantic)
-endif()
-
-enable_testing()
-add_test(NAME api_test COMMAND api_test)

@@ -19,6 +19,8 @@
 
 #include <guayaba/Core/Color.hpp>
 #include <guayaba/Core/Input.hpp>
+#include <guayaba/Core/NodeRef.hpp>
+#include <guayaba/Core/NodeRegistry.hpp>
 #include <guayaba/Core/NodeType.hpp>
 #include <guayaba/Core/Script.hpp>
 #include <guayaba/Core/TermChar.hpp>
@@ -32,6 +34,5 @@
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
 #include <guayaba/Scene/SceneManager.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
-#include <guayaba/UI/UIPrefabs.hpp>
 
 #endif // GUAYABA_GUAYABA_HPP

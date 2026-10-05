@@ -4,6 +4,8 @@
 #include <guayaba/Scene/SceneManager.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
 
+#include "../Core/DeletionQueue.hpp"
+
 namespace guayaba {
 
 SceneManager& SceneManager::get_instance(){
@@ -21,13 +23,17 @@ void SceneManager::process_scene() {
     root_node->update(m_deltaTime);
 }
 
-std::shared_ptr<Node> SceneManager::get_current_scene() {
-    return root_node;
+Node* SceneManager::get_current_scene() {
+    return root_node.get();
 }
 
-void SceneManager::change_scene(std::shared_ptr<Node> new_root) {
+void SceneManager::change_scene(std::unique_ptr<Node> new_root) {
     if (new_root == root_node) return;
-    next_scene = new_root;
+    next_scene = std::move(new_root);
+}
+
+std::unique_ptr<Node> SceneManager::take_scene() {
+    return std::move(root_node);
 }
 
 void SceneManager::start_running() {
@@ -51,8 +57,7 @@ void SceneManager::start_running() {
             if (root_node) {
                 root_node->exit_tree();
             }
-            root_node = next_scene;
-            next_scene = nullptr;
+            root_node = std::move(next_scene);
             if (root_node) {
                 root_node->enter_tree();
             }
@@ -66,10 +71,24 @@ void SceneManager::start_running() {
 
             this->process_scene();
             this->root_node->draw(renderer);
+
+            // Last, so that anything freed earlier in the frame is already gone
+            // before the next one starts, and so a node queued by on_process still
+            // draws its final frame.
+            detail::drain_pending_deletions();
+
             renderer.present();
             increase_frame_count();
         }
     }
+
+    // Teardown: dropping the root can itself queue deletions from destructors,
+    // so drain once more afterwards.
+    if (root_node) {
+        root_node->exit_tree();
+        root_node.reset();
+    }
+    detail::drain_pending_deletions();
 
     // Restore terminal on exit
     if (os_terminal) os_terminal->restore();

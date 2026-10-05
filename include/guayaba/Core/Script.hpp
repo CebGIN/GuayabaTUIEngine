@@ -27,16 +27,31 @@ class ConsoleRenderer;
     A script always assumes it is inside the tree, so attaching one to a node
     that is already live will never deliver on_enter_tree. Ask for it yourself
 
+    OWNERSHIP
+    The node owns its script, and that is what makes the back reference cheap:
+    while any method of yours is running, the node is guaranteed alive, because it
+    owns the object you are executing on. So owner is a plain Node* - no lock, no
+    reference count, no validity check per frame.
+
+        class Blinker : public Script {
+        public:
+            double period = 0.5;
+            double elapsed = 0.0;
+            void on_process(double dt) override {
+                elapsed += dt;
+                if (elapsed >= period) { elapsed = 0.0; // invert the colours }
+            }
+        };
+
+        Blinker* blink = node->add_script<Blinker>();
+        blink->period = 0.2;   // your own fields, through your own handle
+
     SUBCLASSING SCRIPT IS THE NORMAL AND CHEAP ROUTE. Declare your properties
-    as plain typed fields there and reach them through your own reference, which
-    is the short path and needs no cast:
+    as plain typed fields and reach them through the handle add_script<T>()
+    returned; that is the short path and needs no cast.
 
-        auto blink = std::make_shared<Blinker>();
-        node->attach_script(blink);
-        blink->period = 0.2f;   // neither node-> nor dynamic_cast
-
-    get_owner() yields a shared_ptr<Node>. If you need the concrete type,
-    get_owner_as<T>() casts for you, static_assert included.
+    get_owner() yields a Node*. If you need the concrete type, get_owner_as<T>()
+    casts for you, static_assert included.
 */
 class Script {
 public:
@@ -60,25 +75,31 @@ public:
     const std::string& get_script_name() const { return script_name; }
     void set_script_name(std::string name) { script_name = std::move(name); }
 
-    // Empty once the node is gone. The back reference is weak on purpose:
-    // a weak Node -> Script -> Node link cannot form a reference cycle.
-    std::shared_ptr<Node> get_owner() const { return owner.lock(); }
+    // Null once the script is detached. Safe without a check for as long as this
+    // method is running, because the node owns us.
+    Node* get_owner() const { return owner; }
 
     template<typename T>
-    std::shared_ptr<T> get_owner_as() const {
+    T* get_owner_as() const {
         static_assert(std::is_base_of<Node, T>::value, "T must be a Node type.");
-        return std::dynamic_pointer_cast<T>(owner.lock());
+        return dynamic_cast<T*>(owner);
     }
+
+    // True while bound to some node, which is what stops a script from being
+    // stolen from its host by a second attach.
+    bool is_bound() const { return owner != nullptr; }
 
 protected:
     friend class Node;
 
     // Only Node binds and unbinds scripts.
-    void bind_to(const std::shared_ptr<Node>& host) { owner = host; }
-    void unbind() { owner.reset(); }
+    void bind_to(Node* host) { owner = host; }
+    void unbind() { owner = nullptr; }
 
 private:
-    std::weak_ptr<Node> owner;
+    // Not a weak_ptr: the node owns this script, so a cycle is impossible and the
+    // pointer needs no invalidation.
+    Node* owner = nullptr;
     std::string script_name = "Unnamed Script";
 };
 

@@ -11,9 +11,16 @@ namespace guayaba {
 
 class Node;
 
+/*
+    Owns the active scene root and runs the frame loop.
+
+    change_scene() takes a unique_ptr, so the hand-off of a root is visible in the
+    type rather than being a matter of discipline. take_scene() gives the root
+    back if you would rather keep it alive across a scene change.
+*/
 class SceneManager {
     private:
-        std::shared_ptr<Node> root_node = nullptr;
+        std::unique_ptr<Node> root_node;
 
         bool is_running = false;
         SceneManager() = default;
@@ -25,7 +32,7 @@ class SceneManager {
 
         unsigned long int frame_count = 0;
 
-        std::shared_ptr<Node> next_scene = nullptr;
+        std::unique_ptr<Node> next_scene;
 
         std::unique_ptr<IOSTerminal> os_terminal;
 
@@ -34,9 +41,15 @@ class SceneManager {
 
         void process_scene();
 
-        std::shared_ptr<Node> get_current_scene();
+        // Non-owning. Null once the scene is gone.
+        Node* get_current_scene();
 
-        void change_scene(std::shared_ptr<Node> new_root);
+        // The manager takes ownership. Passing a root it already holds is a no-op.
+        void change_scene(std::unique_ptr<Node> new_root);
+
+        // Hands the current root back to the caller, who becomes responsible for
+        // destroying it. The scene becomes null until the next change_scene().
+        std::unique_ptr<Node> take_scene();
 
         void start_running();
 

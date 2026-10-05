@@ -29,8 +29,9 @@ Vec2 Node2D::get_global_position() const {
     if (is_cached_position_valid) return cached_global_position;
     Vec2 global_pos = position;
 
-    std::shared_ptr<Node2D> parent2D = get_parent_of_type<Node2D>();
-    if(parent2D) global_pos = global_pos + parent2D->get_global_position();
+    if (Node2D* parent2D = get_parent_of_type<Node2D>()) {
+        global_pos = global_pos + parent2D->get_global_position();
+    }
 
     cached_global_position = global_pos;
     is_cached_position_valid = true;
