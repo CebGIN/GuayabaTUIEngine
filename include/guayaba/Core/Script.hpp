@@ -85,10 +85,6 @@ public:
         return dynamic_cast<T*>(owner);
     }
 
-    // True while bound to some node, which is what stops a script from being
-    // stolen from its host by a second attach.
-    bool is_bound() const { return owner != nullptr; }
-
 protected:
     friend class Node;
 

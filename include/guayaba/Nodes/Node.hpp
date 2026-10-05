@@ -225,9 +225,8 @@ public:
         return handle;
     }
 
-    // Attaching nullptr, or a script already bound to any node, is a silent
-    // no-op. Replacing this node's own script fires on_detached on the old one,
-    // never on_exit_tree.
+    // Attaching nullptr is a no-op. Replacing this node's own script fires
+    // on_detached on the old one.
     void attach_script(std::unique_ptr<Script> new_script);
 
     void detach_script();

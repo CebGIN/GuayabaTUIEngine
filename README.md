@@ -180,8 +180,12 @@ siga siendo un overlay de verdad por encima del padre.
 
 ### Notas
 
-- Como maximo un script por nodo. Adjuntar `nullptr`, o un script ya ligado a otro
-  nodo, es un no-op silencioso; sustituir el script del nodo dispara `on_detached` en el anterior.
+- Como maximo un script por nodo. Adjuntar `nullptr` es un no-op silencioso; sustituir
+  el script del nodo dispara `on_detached` en el anterior.
+- La propiedad del script se traslada al nodo, asi que un script ya ligado no puede
+  volver a entrar por aqui: no hay ninguna via de la API que lo devuelva. Si eres
+  tu el que fabrica un `unique_ptr` sobre un puntero que ya tiene un nodo, eso ya
+  es un doble dueno, y ningun guard en este metodo lo haria seguro.
 - El nodo posee su script, y su referencia al nodo es un puntero normal: por eso no
   se puede formar un ciclo, y por eso `get_owner()` no necesita comprobar nada.
 - Si escribes un `Node` nuevo y sobrescribes `update` o `draw`, **termina llamando a  `Node::update(...)` / `Node::draw(...)`**. Si no, el script de ese tipo deja de dispararse sin avisar.

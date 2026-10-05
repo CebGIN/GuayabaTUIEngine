@@ -330,19 +330,22 @@ void Node::draw(ConsoleRenderer& renderer) {
 void Node::attach_script(std::unique_ptr<Script> new_script) {
     if (!new_script) return;
 
-    // A bound script is never stolen from its host.
-    if (new_script->is_bound()) return;
-
+    // No "already bound" guard here, and it must stay that way: the parameter
+    // owns the script by the time any check would run, so returning early would
+    // destroy a script the previous host still points at. There is also nothing
+    // to guard - ownership moved into the node and detach_script() destroys
+    // rather than returning, so no bound script can arrive here again.
     detach_script();
 
     script = std::move(new_script);
     script->bind_to(this);
-    script->on_attached();
+
+    if (is_in_tree()) script->on_attached();
 }
 
 void Node::detach_script() {
     if (!script) return;
-    script->on_detached();
+    if (is_in_tree()) script->on_detached();
     script->unbind();
     script.reset();
 }
