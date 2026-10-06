@@ -50,6 +50,26 @@ void SceneManager::start_running() {
     Vec2 buffer_size = {100, 60};
     ConsoleRenderer renderer(buffer_size, os_terminal.get());
 
+    // Nothing below may be allowed to leave the terminal in raw mode.
+    //
+    // LinuxTerminal has no destructor, so restoring is the only thing that puts
+    // echo and the cursor back: if anything in the loop throws, the frame
+    // unwinds straight past a plain call at the bottom of this function and the
+    // user is left typing into a terminal that looks broken, needing `reset`.
+    // Hence a destructor rather than a statement at the end.
+    //
+    // That is a realistic path rather than a theoretical one. A signal reactor
+    // that throws escapes through update() and draw(); so does a connection to a
+    // built-in signal with the wrong signature, because emit_signal() rejects
+    // the mismatch by throwing rather than by staying silent.
+    //
+    // Deliberately not catching: the exception keeps propagating, so the stack
+    // trace still reaches main() intact and restore() runs on the way out.
+    struct TerminalRestoreGuard {
+        IOSTerminal* terminal;
+        ~TerminalRestoreGuard() { if (terminal) terminal->restore(); }
+    } terminal_guard{os_terminal.get()};
+
     while (this->is_running) {
         
         //Cambio de escena
@@ -86,8 +106,8 @@ void SceneManager::start_running() {
     }
     detail::drain_pending_deletions();
 
-    // Restore terminal on exit
-    if (os_terminal) os_terminal->restore();
+    // Terminal restoration is terminal_guard's job, not a statement here: see
+    // its definition above for why it has to be a destructor.
 }
 
 void SceneManager::stop_running() {
