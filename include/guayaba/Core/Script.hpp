@@ -77,13 +77,19 @@ class ConsoleRenderer;
     with neither side holding a handle to the other:
 
         void on_attached() override {
-            connect_script_signal("danio", this, &Blinker::on_danio);
+            // this node's own signal
+            connect_script_signal("danio", node, this, &Blinker::on_danio);
+            // a signal on some other node, owned by this script
+            connect_script_signal("murio", enemigo.get(), this, &Blinker::al_morir);
+            // and one on the bus
             bus().connect_script_signal("mouse_clicked", this, &Blinker::on_click);
         }
         void on_danio(int d) { vida -= d; }
 
-    Both forms take the owner from the script, so the connection is dropped when
-    this node is destroyed and there is nothing to disconnect by hand. The
+    Every one of those reads the owner off the script, so the connection is dropped
+    when THIS node is destroyed and there is nothing to disconnect by hand. That
+    matters most for the cross-node case, where the emitter normally outlives the
+    listener: owning by the emitter would keep calling a script that is gone. The
     forwarders below are these calls with node-> already filled in. See
     Core/Signal.hpp.
 
@@ -150,9 +156,13 @@ protected:
 
     // --- Signals ------------------------------------------------------------
     //
-    // Every one of these is this script's own node with node-> filled in, so a
-    // callback does not have to spell it out. They are protected because a signal
-    // is only meaningful once the script is bound: see owner_nonnull() below.
+    // bus, declare_signal, emit_signal and connect_signal are this script's own
+    // node with node-> already filled in, so a callback does not have to spell it
+    // out. connect_script_signal is the exception: it takes a target, because a
+    // signal on ANOTHER node is exactly the case worth having a forwarder for.
+    //
+    // They are protected because a signal is only meaningful once the script is
+    // bound: see owner_nonnull() below.
 
     // The bus, for the signals no single node owns.
     SignalBus& bus() const { return SignalBus::get_instance(); }
@@ -170,12 +180,13 @@ protected:
         owner_nonnull()->template emit_signal<Args...>(signal_name, std::forward<Args>(args)...);
     }
 
-    // A reactor for a signal on SOME OTHER node, owned by this script. Throws if
-    // that node has no such signal, which is a query you can make yourself with
-    // has_signal() when the emitter may not exist yet.
+    // A reactor on THIS SCRIPT'S OWN node, owned by this script:
     //
-    //     node->get_node<NodeButton>("salir")->connect_signal<int>("clicked",
-    //         [this](int){ ... });
+    //     connect_signal<int>("danio", [this](int d){ vida -= d; });
+    //
+    // Throws if the script's own node has no such signal, which is a query you can
+    // make yourself with has_signal() when the emitter may not exist yet. Use
+    // connect_script_signal below for a signal on another node.
     //
     // The reactor dies with this script's node, not with the node that emits, which
     // is the right way round: the listener is the one that goes away.
@@ -186,15 +197,18 @@ protected:
             detail::make_reactor<Args...>(std::forward<F>(reactor)), owner->instance_id(), once);
     }
 
-    // The same, with the arguments taken from a method's own signature instead of
-    // spelled out:
+    // The cross-node form: a reactor that is a method of this script, connected to
+    // a signal on `target`, with the arguments taken from the method's own
+    // signature instead of spelled out.
     //
-    //     node->get_node<NodeButton>("salir")->connect_script_signal(
-    //         "clicked", this, &MyScript::al_hacer_clic);
+    //     connect_script_signal("danio", enemigo.get(), this, &MyScript::recibir_danio);
     //
-    // Where a Script<N> is available, connect_script_signal on the node needs no
-    // target at all and reads better; this exists for a target reached through a
-    // NodeRef<Button> where the static type is a plain Node.
+    // Two reasons this exists rather than leaving you to Node's form. First the
+    // owner: it is read off the script, not off `target`, so the connection dies
+    // with the listener instead of with the emitter. Second the ordering: it calls
+    // signal<>() rather than declare_signal(), so it THROWS when the target has no
+    // such signal instead of quietly creating one nothing will ever emit - which is
+    // what you want when the emitter is somebody else's node.
     template<typename R, typename C, typename... Args>
     uint64_t connect_script_signal(const std::string& signal_name,
                                    Node* target,
@@ -204,11 +218,14 @@ protected:
         if (target == nullptr) {
             throw std::invalid_argument("ScriptBase::connect_script_signal: null target node.");
         }
+        if (reactor == nullptr) {
+            throw std::invalid_argument("ScriptBase::connect_script_signal: null reactor.");
+        }
         return target->template signal<std::decay_t<Args>...>(signal_name).connect(
             [reactor, member](std::decay_t<Args>... args) {
                 (reactor->*member)(std::forward<decltype(args)>(args)...);
             },
-            owner->instance_id(), once);
+            detail::reactor_owner<C>::of(reactor, owner->instance_id()), once);
     }
 
 private:

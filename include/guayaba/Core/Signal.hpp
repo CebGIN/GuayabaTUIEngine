@@ -64,6 +64,27 @@ uint64_t next_connection_id();
 // declaration does not dereference it.
 uint64_t node_id_of(Node* node);
 
+// The node that OWNS A REACTOR, when there is one to ask.
+//
+// A script's owner is always its own node, so a reactor written as a method of a
+// script is owned by that script's node - never by whichever node happens to hold
+// the signal. Getting that backwards is a use-after-free rather than a leak: the
+// signal outlives the reactor, so the reactor keeps being called after the script
+// it belongs to has been destroyed.
+//
+// fallback is what to do when there is no owner to ask: the node whose own signal
+// is being connected to, or INVALID_ID on the bus where no such node is in hand.
+// Anything with get_owner() overrides it and ignores the fallback.
+template<typename T, typename = void>
+struct reactor_owner {
+    static uint64_t of(T*, uint64_t fallback) { return fallback; }
+};
+
+template<typename T>
+struct reactor_owner<T, std::void_t<decltype(std::declval<T&>().get_owner())>> {
+    static uint64_t of(T* subject, uint64_t) { return node_id_of(subject->get_owner()); }
+};
+
 // Builds "void(int, char)". The two packs expand in lockstep, which is why this
 // works at all: Args and I are the same length by construction.
 template<typename T>
@@ -129,10 +150,9 @@ std::function<void(Args...)> make_reactor(F&& reactor) {
     extra is registered, indexed or destroyed - the tree's own id table does the
     work. See Core/NodeRegistry.hpp.
 
-    Dropping is lazy: it happens on the next emit rather than at the moment of
-    death. A connection to a dead owner therefore lingers in the list until
-    something emits, which costs one array index per reactor per emit and nothing
-    at all in frames where nothing is emitted.
+    Dropping is lazy in the sense that it costs nothing until something emits: a
+    connection to a dead owner lingers in the list, and the next emit on that
+    signal prunes it. So a frame where nothing is emitted pays nothing at all.
 
     A connection made with an ownerless connect() has INVALID_ID as its owner and
     is never dropped automatically. That is the escape hatch for a reactor that
@@ -143,16 +163,25 @@ std::function<void(Args...)> make_reactor(F&& reactor) {
     disconnect or free nodes while it runs. The consequences are fixed rather
     than incidental:
 
-      - Every reactor connected when emit() began still runs, even if an earlier
-        one disconnected it. There is no "cancelled" flag, matching Godot.
+      - Every PERSISTENT reactor connected when emit() began still runs, even if
+        an earlier one disconnected it. There is no "cancelled" flag, matching
+        Godot.
       - A reactor connected during an emit does NOT run for that emit.
       - A once-reactor is removed BEFORE being called, so a throwing reactor
-        cannot leave it armed to fire again.
+        cannot leave it armed to fire again - and a reactor earlier in the same
+        walk that re-emitted cannot fire it a second time.
 
-    COST
-    A std::function per connection, plus a snapshot copy per emit. For an event
-    fired a handful of times a frame that is the right trade for not having to
-    think about reentrancy; for a per-frame fan-out on a hot path, measure it.
+    DEAD OWNERS
+    The liveness check happens once, at the top of emit(), and the dead entries
+    are removed there too. That placement is not incidental: a reactor can free
+    the very Signal this method is running in - clear_signals(), SignalBus::clear(),
+    dropping the unique_ptr that owns it - so anything touched after a reactor
+    returns would be a use-after-free. Compacting first means nothing is.
+
+    The cost is one registry resolve per reactor per emit, plus one compaction
+    pass. For an event fired a handful of times a frame that is the right trade
+    for not having to think about reentrancy; for a per-frame fan-out on a hot
+    path, measure it.
 
     INHERITANCE
     detail::SignalBase is inherited publicly, which is what lets Node store a
@@ -191,26 +220,28 @@ public:
     // that does not match this signature does not compile here, which is the
     // point of keeping the storage erased and the surface typed.
     void emit(Args... args) {
+        // Pruned FIRST, and never afterwards. A reactor may call clear_signals(),
+        // drop the node that owns this signal, or reset the unique_ptr that owns
+        // it - any of which frees the object this method is a member of. So the
+        // compaction happens while `this` is still known good, and nothing below
+        // touches the signal after a reactor has run. That is also what makes
+        // is_connected() and reactor_count() honest: they are asked after an emit,
+        // and by then the dead entries are already gone.
+        prune_dead();
+
         // Copied because a reactor is allowed to mutate this list, and the walk
-        // has to survive it. Connections are a handful of entries at most.
+        // has to survive it. Connections are a handful of entries in the shapes
+        // this gets used for.
         const std::vector<Connection> snapshot = connections_;
 
-        bool has_dead = false;
-
         for (const Connection& connection : snapshot) {
-            if (is_owner_dead(connection.owner_id)) {
-                has_dead = true;
-                continue;
-            }
-
-            // Dropped before the call, not after: a reactor that throws should
-            // not get a second turn.
-            if (connection.once) disconnect(connection.id);
+            // Once more, because a reactor earlier in this same walk may have
+            // emitted again and consumed it. Without the check a reentrant emit
+            // would fire it twice.
+            if (connection.once && !disconnect(connection.id)) continue;
 
             connection.reactor(std::forward<Args>(args)...);
         }
-
-        if (has_dead) prune_dead();
     }
 
     size_t reactor_count() const override { return connections_.size(); }

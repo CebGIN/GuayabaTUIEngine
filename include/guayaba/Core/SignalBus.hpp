@@ -15,23 +15,6 @@ namespace guayaba {
 
 class Node;
 
-namespace detail {
-
-// Reads a node's id off anything that has get_owner(), without this header having
-// to know what ScriptBase is. The fallback is an ownerless connection, which is
-// what a plain class with no owner node should get anyway.
-template<typename T, typename = void>
-struct owner_id_of {
-    static uint64_t get(T*) { return NodeRegistry::INVALID_ID; }
-};
-
-template<typename T>
-struct owner_id_of<T, std::void_t<decltype(std::declval<T&>().get_owner())>> {
-    static uint64_t get(T* subject) { return node_id_of(subject->get_owner()); }
-};
-
-} // namespace detail
-
 /*
     Engine-wide signals, for the things that are not one node's business: input,
     scene changes, a game state that any part of a scene may want to hear about.
@@ -81,9 +64,11 @@ public:
     // a reactor that owns nothing at all - a free function, a lambda over a value
     // - which then has to be disconnected by hand.
     template<typename... Args, typename F>
-    uint64_t connect_signal(const std::string& signal_name, F&& reactor, Node* owner = nullptr) {
+    uint64_t connect_signal(const std::string& signal_name, F&& reactor,
+                            Node* owner = nullptr, bool once = false) {
         return declare<Args...>(signal_name).connect(
-            detail::make_reactor<Args...>(std::forward<F>(reactor)), detail::node_id_of(owner));
+            detail::make_reactor<Args...>(std::forward<F>(reactor)),
+            detail::node_id_of(owner), once);
     }
 
     // The form to use from inside a Script when the reactor is a method of that
@@ -94,19 +79,24 @@ public:
     //     ...
     //     bus().connect_script_signal("mouse_clicked", this, &MyScript::on_mouse_clicked);
     //
-    // The owner is taken from the script itself - a script's owner is always its
+    // The owner is read off the script itself - a script's owner is always its
     // own node - so the connection dies with that node and nothing has to be
-    // disconnected by hand.
+    // disconnected by hand. C is not constrained to be a Script: a plain class
+    // with the right member works, and gets an ownerless connection, which is the
+    // honest answer for an object no node owns.
     template<typename R, typename C, typename... Args>
     uint64_t connect_script_signal(const std::string& signal_name,
                                    C* reactor,
                                    R (C::*member)(Args...),
                                    bool once = false) {
+        if (reactor == nullptr) {
+            throw std::invalid_argument("SignalBus::connect_script_signal: null reactor.");
+        }
         return declare<std::decay_t<Args>...>(signal_name).connect(
             [reactor, member](std::decay_t<Args>... args) {
                 (reactor->*member)(std::forward<decltype(args)>(args)...);
             },
-            detail::owner_id_of<C>::get(reactor), once);
+            detail::reactor_owner<C>::of(reactor, detail::NodeRegistry::INVALID_ID), once);
     }
 
     // A query, false rather than throwing: an emitter asks this so that a signal
@@ -114,6 +104,17 @@ public:
     template<typename... Args>
     bool has_signal(const std::string& signal_name) const {
         return signals.find<std::decay_t<Args>...>(signal_name) != nullptr;
+    }
+
+    // The same question with the shape ignored: true if the name is declared at
+    // all, whatever its signature.
+    //
+    // This is the one an ENGINE emitter wants. has_signal<Args...> is also false
+    // when the name exists with a different signature, and using that as an emit
+    // guard turns one wrong guess into a signal that silently never fires for
+    // the rest of the process - the guard itself is what makes it silent.
+    bool is_declared(const std::string& signal_name) const {
+        return signals.signature_of(signal_name) != nullptr;
     }
 
     // The signal itself, for a caller that wants to count reactors or disconnect

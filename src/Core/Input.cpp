@@ -17,11 +17,16 @@ bool r_click_just_pressed = false;
 
 namespace {
 
-// What mouse_pos was at the previous refresh, so mouse_moved means "the pointer
-// went somewhere" rather than "a frame happened". Not a global on purpose: nothing
+// The pointer position at the previous refresh, so mouse_moved means "the pointer
+// went somewhere" rather than "a frame happened". File-local on purpose: nothing
 // outside refresh_input() may read it.
-Vec2 last_emitted_mouse_pos = {0, 0};
-bool has_emitted_mouse = false;
+//
+// The first refresh only records the position, and emits nothing. There is no
+// "previous" to compare against yet, so emitting would be reporting a movement
+// that never happened - and the first thing a listener does with a mouse position
+// is usually something visible.
+Vec2 previous_mouse_pos = {0, 0};
+bool has_previous_mouse = false;
 
 } // namespace
 
@@ -43,31 +48,35 @@ void refresh_input() {
     // Emitted from here, which the frame loop already calls before process_scene():
     // a reactor therefore sees the click in the same frame the scripts update in.
     //
-    // Both are on the bus rather than on a node because the terminal is not a node,
-    // and both are checked at the connect call even though the bus erases the
-    // arguments: a reactor for "mouse_clicked" has to take (int, Vec2).
+    // Both are on the bus rather than on a node because the terminal is not a node.
+    // Both are checked at the connect call even though the bus erases the arguments:
+    // a reactor for "mouse_clicked" has to take (int, Vec2).
     //
-    // has_signal is what makes this cheap. Without it, every frame would declare a
-    // signal nobody declared and walk an empty reactor list.
+    // The guard is is_declared and NOT has_signal<int, Vec2>(...). is_declared
+    // ignores the signature, which is what an emitter needs: has_signal is also
+    // false when the name exists with a different signature, and using that as an
+    // emit guard would turn one wrong guess at connect time into a signal that
+    // silently stops firing for the rest of the process. With is_declared, a
+    // mismatched reactor gets the throw from emit_signal instead of the quiet.
     SignalBus& bus = SignalBus::get_instance();
 
-    if (l_click_just_pressed || r_click_just_pressed) {
-        if (bus.has_signal<int, Vec2>("mouse_clicked")) {
-            // 1 and 2 rather than an enum: a reactor can compare them without this
-            // header, and a mouse with a middle button can be added later without
-            // renumbering.
-            bus.emit_signal("mouse_clicked", l_click_just_pressed ? 1 : 2, mouse_pos);
-        }
+    // At most one per frame, and left wins if both somehow register on the same
+    // poll: the terminal reports two booleans, not a queue of events.
+    if ((l_click_just_pressed || r_click_just_pressed)
+        && bus.is_declared("mouse_clicked")) {
+        // 1 and 2 rather than an enum: a reactor can compare them without this
+        // header, and a mouse with a middle button can be added later without
+        // renumbering.
+        bus.emit_signal("mouse_clicked", l_click_just_pressed ? 1 : 2, mouse_pos);
     }
 
-    if (!has_emitted_mouse || mouse_pos.x != last_emitted_mouse_pos.x
-        || mouse_pos.y != last_emitted_mouse_pos.y) {
-        if (bus.has_signal<Vec2>("mouse_moved")) {
-            bus.emit_signal("mouse_moved", mouse_pos);
-        }
-        last_emitted_mouse_pos = mouse_pos;
-        has_emitted_mouse = true;
+    if (has_previous_mouse
+        && (mouse_pos.x != previous_mouse_pos.x || mouse_pos.y != previous_mouse_pos.y)
+        && bus.is_declared("mouse_moved")) {
+        bus.emit_signal("mouse_moved", mouse_pos);
     }
+    previous_mouse_pos = mouse_pos;
+    has_previous_mouse = true;
 }
 
 std::string get_line_input(Vec2 position) {

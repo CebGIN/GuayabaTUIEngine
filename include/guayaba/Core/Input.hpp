@@ -40,9 +40,16 @@ std::string get_line_input(Vec2 position = {0, 0});
 
     HOW THE PAYLOADS ARE SHAPED
     They are checked at the connect call, not at the emit: a reactor for
-    "mouse_clicked" has to take (int, Vec2) or (int, Vec2) and nothing else.
-    The button is 1 for left and 2 for right, as plain ints rather than an enum so
-    that a reactor needs no include to compare them.
+    "mouse_clicked" has to take (int, Vec2) and nothing else. Get the signature
+    wrong and emit_signal says so rather than quietly not firing.
+
+    WHAT IS AND IS NOT EMITTED
+    mouse_clicked fires at most once per refresh, and reports 1 (left) if both
+    buttons register on the same poll - the terminal hands over two booleans, not a
+    queue of events. mouse_moved fires only when the position actually changed
+    since the previous refresh, which means NOT on the first frame: there is no
+    previous position yet, and a listener that highlights or follows the pointer
+    should not be handed a movement that never happened.
 
     WHY THERE IS NO KEY SIGNAL
     There is no key signal because the engine has no key input: IOSTerminal exposes

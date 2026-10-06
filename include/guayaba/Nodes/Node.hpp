@@ -343,12 +343,14 @@ public:
     // A node's own events. emit_signal calls every reactor connected to that name
     // on this node, in the order they were connected:
     //
+    //     player->connect_signal<int>("danio", [](int d){ refresh(d); });
     //     player->emit_signal("danio", 7);
-    //     barra->connect_signal<int>("danio", [barra_weak](int d){ refresh(d); });
     //
-    // Nothing here needs a handle to the other node if you wire it from the same
-    // builder function, because connect_signal's owner is the node doing the
-    // connecting, not the node that will later emit.
+    // Note which node each call goes to. A signal belongs to the node that will
+    // emit it, so connecting to "danio" means calling this on `player`: you need a
+    // handle to the emitter. What you do NOT need is a handle to the listener,
+    // because the connection is owned by `this` - the reactor is dropped when this
+    // node dies, whoever it belongs to.
     //
     // A reactor connected here is dropped automatically when THIS node is
     // destroyed, so a script may connect freely without recording ids or
@@ -390,35 +392,52 @@ public:
     // because they cannot be read off a lambda. Inside a Script, prefer
     // connect_script_signal below or ScriptBase::connect_signal, which take them
     // from a method's own signature instead.
+    //
+    // owner is the node the reactor belongs to, which is what decides when the
+    // connection dies. It defaults to nullptr, meaning this node. Pass a node only
+    // when the reactor really does belong to another one.
     template<typename... Args, typename F>
-    uint64_t connect_signal(const std::string& signal_name, F&& reactor, bool once = false) {
+    uint64_t connect_signal(const std::string& signal_name, F&& reactor,
+                            bool once = false, Node* owner = nullptr) {
         return declare_signal<Args...>(signal_name).connect(
-            detail::make_reactor<Args...>(std::forward<F>(reactor)), instance_id_, once);
+            detail::make_reactor<Args...>(std::forward<F>(reactor)),
+            owner != nullptr ? detail::node_id_of(owner) : instance_id_, once);
     }
 
     // The form to use from inside a Script when the reactor is a method of that
     // script: the arguments come from the method's own signature, so nothing is
     // spelled twice, and there is no lambda capturing `this` to get wrong.
     //
-    //     connect_signal("danio", this, &MyScript::recibir_danio);
+    //     player->connect_script_signal("danio", this, &MiScript::recibir_danio);
+    //
+    // The owner is read off `reactor`, never off this node. This node holds the
+    // signal and normally outlives the reactor, so owning the connection by it
+    // would keep calling a script that is already gone.
     //     void MyScript::recibir_danio(int d) { vida -= d; }
     template<typename R, typename C, typename... Args>
     uint64_t connect_script_signal(const std::string& signal_name,
                                    C* reactor,
                                    R (C::*member)(Args...),
                                    bool once = false) {
+        if (reactor == nullptr) {
+            throw std::invalid_argument("Node::connect_script_signal: null reactor.");
+        }
         return declare_signal<std::decay_t<Args>...>(signal_name).connect(
             [reactor, member](std::decay_t<Args>... args) {
                 (reactor->*member)(std::forward<decltype(args)>(args)...);
             },
-            instance_id_, once);
+            // Read off the reactor, never off this node: this node holds the
+            // signal and normally outlives the reactor, so owning by it would keep
+            // calling a script that is already gone. reactor_owner falls back to
+            // instance_id_ for a C with no owner of its own.
+            detail::reactor_owner<C>::of(reactor, instance_id_), once);
     }
 
     // Calls every reactor currently connected to that name. Args are deduced and
-    // decayed, so emit_signal("danio", d) finds the void(int) signal whether d is
-    // an int, an unsigned or a size_t copy of one. The arguments are forwarded to
-    // the reactors unchanged; the reactor list itself is snapshotted, so a reactor
-    // may connect, disconnect or free nodes while this runs.
+    // decayed - which strips references and cv-qualifiers and nothing else, so an
+    // unsigned argument still looks for a signal declared void(unsigned) and finds
+    // none. Declare the signal to match what you actually pass.
+    //
     template<typename... Args>
     void emit_signal(const std::string& signal_name, Args&&... args) {
         declare_signal<std::decay_t<Args>...>(signal_name).emit(std::forward<Args>(args)...);

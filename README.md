@@ -398,9 +398,9 @@ ya esta completo y el nodo ya tiene duena.
 
 ### Los reactors no cuelgan
 
-Una conexion guarda **el id del nodo al que pertenece el reactor**, que es el nodo desde
-el que conectaste. Antes de cada llamada ese id se resuelve contra el `NodeRegistry`: si ya
-no resuelve, el reactor se descarta en vez de llamarse.
+Una conexion guarda **el id del nodo al que pertenece el reactor**. Antes de cada llamada
+ese id se resuelve contra el `NodeRegistry`: si ya no resuelve, el reactor se descarta en
+vez de llamarse.
 
 Eso se apoya en un invariante que ya existia: `~Node` llama a `unregister_node()` antes de
 destruir cualquier miembro, y todos los caminos de destruccion del motor pasan por ahi. Asi
@@ -408,22 +408,41 @@ que el id empieza a fallar exactamente cuando el dueno del reactor se vuelve ina
 que es justo cuando llamarlo seria comportamiento indefinido. No hay nada mas que registrar
 ni que indexar: lo hace la tabla de ids del arbol.
 
+### Quien es el dueno, y por que no es el emisor
+
+El dueno es **el nodo al que pertenece el reactor**, no el nodo que tiene la senal. En el
+caso habitual - un reactor de un script escuchando la senal de otro nodo - esa distincion
+es la diferencia entre funcionar y un use-after-free:
+
+```cpp
+// El emisor suele vivir MAS que el oyente. Si la conexion fuese de el, este
+// lambda seguiria llamandose con el script ya destruido.
+enemigo->connect_signal<int>("danio", [this](int d){ ... });
+```
+
+Las formas de miembro leen el dueno del propio script, asi que esto ya no puede pasar por
+alto:
+
+```cpp
+enemigo->connect_script_signal("danio", this, &BarraDeVida::al_recibir_danio);
+```
+
+Y cuando el dueno no es un script, el dueno es el nodo sobre el que conectaste. Para dar
+uno explicitamente, el ultimo argumento de `Node::connect_signal`:
+
+```cpp
+emisor->connect_signal<int>("danio", [this](int d){ ... }, /*once=*/false, /*owner=*/dueno);
+```
+
 Consecuencias:
 
 - Un script puede conectar sin guardar ids ni escribir desconexiones. La conexion se va
-  con su nodo.
-- Una conexion sin dueno (`connect` directo, o `connect_signal` del bus sin nodo) **no** se
-  descarta sola. Ese es el precio de no tener dueno, y se paga con
+  con su nodo, sea cual sea el nodo que emita.
+- Una conexion sin dueno (`connect` directo, o el `connect_signal` del bus sin nodo) **no**
+  se descarta sola. Ese es el precio de no tener dueno, y se paga con
   `disconnect_signal(id)` o `SignalBus::clear()`.
-- La limpieza es perezosa: ocurre en el siguiente `emit`, no en el instante de la muerte.
-  `is_connected(id)` sigue respondiendo `true` hasta que alguien emite.
-
-El bus tambien acepta conexiones con dueno, que es la forma de que un reactor de un script
-no sobreviva a su nodo:
-
-```cpp
-bus().connect_signal<int, Vec2>("mouse_clicked", [this](int, Vec2){ ... }, node);
-```
+- La limpieza es perezosa: ocurre en el siguiente `emit` de esa senal, no en el instante de
+  la muerte. `is_connected(id)` sigue respondiendo `true` hasta que alguien emite.
 
 ### Firmas
 
@@ -437,8 +456,10 @@ corrientes, y un reactor cuyos parametros no encajan es un **error de compilacio
 `std::logic_error` diciendo como se declaro. Los nombres de tipo salen de `typeid`, o sea
 que van mangled (`void(i)` en vez de `void(int)`).
 
-Los argumentos de `emit_signal` se degradan, asi que `emit_signal("danio", d)` encuentra la
-senal `void(int)` tanto si `d` es `int` como `unsigned` o `size_t`.
+Los argumentos de `emit_signal` se degradan, yeso es todo: se quitan las referencias y los
+`const`, y **no** se convierten los enteros. `emit_signal("danio", d)` encuentra la senal
+`void(int)` si `d` es `int`; si `d` es `unsigned` busca `void(unsigned)`, no encuentra nada y
+lanza. Declara la senal para que case con lo que de verdad vas a pasar.
 
 ### Reactores, de mas simple a mas corto
 
@@ -453,12 +474,15 @@ nodo->connect_signal("murio", [this]{ mostrar_cadaver(); });
 //    capturar `this`.
 nodo->connect_script_signal("danio", this, &MiScript::al_recibir_danio);
 
-// 4. Miembro de un script, sobre la senal de OTRO nodo. Lo de dentro de un script
-//    ya lo hace ScriptBase::connect_signal, sin repetir el nodo destino.
+// 4. Miembro de un script, sobre la senal de OTRO nodo. El dueno sigue siendo el
+//    script, no `otro_nodo`. Dentro de un script, ScriptBase::connect_script_signal
+//    hace lo mismo sin repetir el destino - y ademas lanza si ese destino no ha
+//    declarado la senal, en vez de crear una que nadie va a emitir.
 otro_nodo->connect_script_signal("danio", this, &MiScript::al_recibir_danio);
 
 // 5. Sin dueno: hay que desconectar a mano. Para un reactor que no posee nada.
-nodo->connect_signal<int>("danio", [contador]() { ++*contador; });
+//    Ojo: la lambda tiene que poder llamarse con los argumentos de la senal.
+nodo->connect_signal<int>("danio", [contador](int){ ++*contador; });
 ```
 
 `connect_signal` toma el reactor como referencia reenviable y construye el `std::function`
@@ -471,14 +495,23 @@ conectar una, ni siquiera escribiendo `<int>` en la llamada.
 `emit` recorre una **copia** de la lista de reactores, asi que un reactor puede conectar,
 desconectar o liberar nodos mientras se ejecuta. Las reglas son fijas, no incidentales:
 
-- Todos los reactores conectados cuando empezo el `emit` se ejecutan, aunque uno anterior
-  los haya desconectado. No hay bandera de "cancelado", igual que en Godot.
+- Todos los reactores **persistentes** conectados cuando empezo el `emit` se ejecutan,
+  aunque uno anterior los haya desconectado. No hay bandera de "cancelado", igual que en
+  Godot.
 - Un reactor conectado **durante** un `emit` no se ejecuta en ese `emit`.
 - Un reactor `once` se borra **antes** de llamarse, asi que uno que lanza no queda armado.
+  Y si un reactor anterior de la misma lista vuelve a emitir esta senal, el `once` no se
+  dispara por segunda vez: ya no esta.
 
-Coste: un `std::function` por conexion y una copia de la lista por `emit`. Para un evento
-que se dispara unas pocas veces por frame es el intercambio correcto; para una diffusion
-por frame en un camino caliente, midelo.
+Los reactores con dueno muerto se limpian **al principio** del `emit`, no al final. No es
+un detalle: un reactor puede llamar a `clear_signals()`, soltar el nodo que duena la senal
+o borrar el `unique_ptr` que la contiene, y cualquiera de esas cosas destruye el objeto
+sobre el que `emit` esta trabajando. Compacting antes significa que despues de llamar a un
+reactor no queda nada que tocar.
+
+Coste: un `std::function` por conexion, una copia de la lista por `emit` y una pasada de
+compactado. Para un evento que se dispara unas pocas veces por frame es el intercambio
+correcto; para una difusion por frame en un camino caliente, midelo.
 
 ### El bus global
 
@@ -515,8 +548,8 @@ Y en el bus, desde `Input::refresh_input()`, que el bucle ya llama **antes** de
 
 | Señal | Carga | Cuando |
 |---|---|---|
-| `mouse_clicked` | `(int boton, Vec2 posicion)` | 1 = izquierdo, 2 = derecho, en el frame del clic |
-| `mouse_moved` | `(Vec2 posicion)` | solo cuando el puntero se ha movido de verdad |
+| `mouse_clicked` | `(int boton, Vec2 posicion)` | 1 = izquierdo, 2 = derecho. Como maximo una por frame, y si los dos botones caen en el mismo poll gana el izquierdo: el terminal entrega dos booleanos, no una cola de eventos |
+| `mouse_moved` | `(Vec2 posicion)` | solo cuando la posicion **ha cambiado** desde el refresh anterior, y por tanto **tampoco en el primer frame**, cuando todavia no hay posicion anterior con la que comparar |
 
 El boton es un `int` y no un enum a proposito, para que un reactor pueda compararlo sin
 incluir esta cabecera.
@@ -529,11 +562,25 @@ meter un poll de teclas en `IOSTerminal` y en los dos backends primero; en ese m
 ### Consultas y limpieza
 
 ```cpp
-nodo->has_signal<int>("danio");     // false si no existe o si es de otra firma
+nodo->has_signal<int>("danio");     // false si no existe O si es de otra firma
 nodo->get_signal_count();           // cuantas senales declara este nodo
 nodo->is_connected(id);             // sigue vivo ese id de conexion
 nodo->disconnect_signal(id);        // false si nadie lo tenia
-nodo->clear_signals();              // suelta todos los reactores de este nodo
+nodo->clear_signals();              // suelta los reactores que ESCUCHAN a este nodo
+
+SignalBus::get_instance().is_declared("mouse_clicked");   // ignora la firma
+```
+
+`is_declared` es la consulta que quiere un emisor del motor. `has_signal<Args...>` tambien
+es `false` cuando el nombre existe con otra firma, y usar eso como guarda de un `emit`
+convierte una unica suposicion equivocada en una senal que deja de dispararse en silencio
+durante el resto del proceso: la propia guarda es la que lo hace silencioso. Con
+`is_declared`, un reactor con la firma equivocada recibe el `std::logic_error` de
+`emit_signal` en vez de nada.
+
+Y ojo con `clear_signals()`: suelta los reactores que escuchan a **este** nodo. No toca las
+conexiones que este nodo tenga en las senales de otros, que viven en la tabla de esos otros
+nodos. Para un teardown de escena, `SignalBus::clear()` es lo que baja todo.
 ```
 
 `has_signal` no es decorativo: es lo que hace que un emisor builtin cueste una busqueda en
