@@ -23,6 +23,7 @@
 #include <guayaba/Core/NodeRegistry.hpp>
 #include <guayaba/Core/NodeType.hpp>
 #include <guayaba/Core/Script.hpp>
+#include <guayaba/Core/ScriptRef.hpp>
 #include <guayaba/Core/TermChar.hpp>
 #include <guayaba/Core/Vec2.hpp>
 #include <guayaba/Nodes/Node.hpp>

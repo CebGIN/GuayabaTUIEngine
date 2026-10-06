@@ -26,16 +26,19 @@ std::unique_ptr<Node> crearEscena() {
 
     root->add_child<NodeBox>("fondo", Vec2{0, 0}, Vec2{64, 20}, Color::BLUE);
 
-    Node2D* fondo = root->get_child<Node2D>(0);
+    // add_child<> y get_child<> devuelven NodeRef<T>: guardan un id, no una
+    // direccion, asi que un handle liberado responde vacio en vez de quedar
+    // colgando. Para usarlos dentro del subarbol que los contiene basta get().
+    const NodeRef<Node2D> fondo = root->get_child<Node2D>(0);
 
     fondo->add_child<NodeUI>("titulo", Vec2{4, 2},
         Color::BRIGHT_WHITE, Color::BLUE,
         std::vector<std::string>{"=== GuayabaTUIEngine ==="});
 
-    Node2D* contenido = fondo->add_child<Node2D>("contenido", Vec2{4, 5});
+    const NodeRef<Node2D> contenido = fondo->add_child<Node2D>("contenido", Vec2{4, 5});
 
     // Boton que termina el bucle principal.
-    NodeButton* salir = contenido->add_child<NodeButton>("salir", Vec2{40, 16},
+    const NodeRef<NodeButton> salir = contenido->add_child<NodeButton>("salir", Vec2{40, 16},
         Color::BLACK, Color::BRIGHT_WHITE,
         std::vector<std::string>{
             ".--------.",

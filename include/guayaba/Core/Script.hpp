@@ -2,6 +2,7 @@
 #define GUAYABA_CORE_SCRIPT_HPP
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -17,47 +18,78 @@ class ConsoleRenderer;
     node's C++ class. The idea is Godot's Script: bolt logic and your own state
     onto a prefab you did not write, without reimplementing its rendering.
 
-    Two lifecycles live here, and they are deliberately not mixed:
+    Two classes, in two layers:
 
-      - The NODE's lifecycle -> on_enter_tree / on_exit_tree. Fired only when
-        the node actually joins or leaves the scene tree.
-      - The SCRIPT's lifecycle -> on_attached / on_detached. Fired only when the
-        script is bound to, or unbound from, a node.
+      - ScriptBase  is what a Node stores and dispatches through. It knows the
+        owner only as a Node*, so it is the type that works for any node.
+      - Script<N>    is what you derive from. It names the type of node it
+        belongs to and keeps a typed handle to it, so your callbacks touch
+        properties directly instead of casting first.
 
-    A script always assumes it is inside the tree, so attaching one to a node
-    that is already live will never deliver on_enter_tree. Ask for it yourself
-
-    OWNERSHIP
-    The node owns its script, and that is what makes the back reference cheap:
-    while any method of yours is running, the node is guaranteed alive, because it
-    owns the object you are executing on. So owner is a plain Node* - no lock, no
-    reference count, no validity check per frame.
-
-        class Blinker : public Script {
+        class Blinker : public Script<Node2D> {
         public:
             double period = 0.5;
             double elapsed = 0.0;
             void on_process(double dt) override {
                 elapsed += dt;
-                if (elapsed >= period) { elapsed = 0.0; // invert the colours }
+                if (elapsed >= period) {
+                    elapsed = 0.0;
+                    node->invert_colors();   // typed: no cast, no qualifier
+                }
             }
         };
 
-        Blinker* blink = node->add_script<Blinker>();
-        blink->period = 0.2;   // your own fields, through your own handle
+        Node2D* body = ...;
+        ScriptRef<Node2D, Blinker> blink = body->attach_script<Blinker>();
+        blink.script()->period = 0.2;   // your own fields, through your own handle
 
-    SUBCLASSING SCRIPT IS THE NORMAL AND CHEAP ROUTE. Declare your properties
-    as plain typed fields and reach them through the handle add_script<T>()
-    returned; that is the short path and needs no cast.
+    Derive from Script<N>, never from ScriptBase: a script written against
+    ScriptBase has to cast its way back to anything interesting. Derive from
+    Script<N> and the cast is already done.
 
-    get_owner() yields a Node*. If you need the concrete type, get_owner_as<T>()
-    casts for you, static_assert included.
+    Neither class is abstract in the language sense - every hook below has a
+    no-op default, so a draw-only script is not made to stub on_process. What is
+    enforced is the contract: attach_script<T>() rejects an abstract T, because a
+    hook you cannot override is a hook the engine can dispatch to nothing.
+
+    THE SLOT IS SEALED
+    A node keeps the first script it is given until it is destroyed. There is no
+    detach, and attaching a second script throws, because swapping one out would
+    leave every handle anyone held pointing at freed memory with nothing to test
+    - the exact situation ScriptRef exists to make checkable. Build the subtree
+    and attach the scripts before handing it to a scene; see Core/ScriptRef.hpp
+    for what the seal buys and what depends on it.
+
+    Two lifecycles live here, and they are deliberately not mixed:
+
+      - The NODE's lifecycle -> on_enter_tree / on_exit_tree. Fired only when
+        the node actually joins or leaves the scene tree.
+      - The SCRIPT's lifecycle -> on_attached / on_detached. Fired when the
+        script is bound to a node, and when that node is destroyed. Since
+        binding only happens while building, on_attached is a build-time hook,
+        not something the running tree triggers.
+
+    A script attached while the node is already live never sees on_enter_tree,
+    because a live node cannot be given a new script. Ask for it yourself:
+
+        void on_attached() override {
+            if (node->is_in_tree()) on_enter_tree();
+        }
+
+    OWNERSHIP
+    The node owns its script, and that is what makes the back reference cheap:
+    while any method of yours is running, the node is guaranteed alive, because it
+    owns the object you are executing on. So owner is a plain Node* - no lock, no
+    reference count, no validity check per frame. Script<N>'s typed handle is the
+    same pointer, narrowed once at bind time rather than per access.
 */
-class Script {
+class ScriptBase {
 public:
-    virtual ~Script() = default;
+    virtual ~ScriptBase() = default;
 
-    // Script lifecycle.
+    // Script lifecycle. Both are build-time hooks now: binding only happens
+    // while assembling a subtree, and a node fires on_detached from its own
+    // destructor, so it is the last thing your script ever sees.
     virtual void on_attached() {}
     virtual void on_detached() {}
 
@@ -75,10 +107,14 @@ public:
     const std::string& get_script_name() const { return script_name; }
     void set_script_name(std::string name) { script_name = std::move(name); }
 
-    // Null once the script is detached. Safe without a check for as long as this
-    // method is running, because the node owns us.
+    // Non-null for as long as this script exists, which is as long as its node.
+    // Safe without a check for as long as this method is running, because the
+    // node owns us. Inside Script<N> prefer node, which is the same pointer
+    // already narrowed to N.
     Node* get_owner() const { return owner; }
 
+    // Escape hatch for code written against ScriptBase. A Script<N> needs none
+    // of this: node is already the concrete type.
     template<typename T>
     T* get_owner_as() const {
         static_assert(std::is_base_of<Node, T>::value, "T must be a Node type.");
@@ -88,15 +124,60 @@ public:
 protected:
     friend class Node;
 
-    // Only Node binds and unbinds scripts.
-    void bind_to(Node* host) { owner = host; }
-    void unbind() { owner = nullptr; }
+    // Only Node binds a script, and only once: the slot is sealed on the first
+    // successful bind, so there is no matching unbind. Virtual because Node calls
+    // this through a ScriptBase*, so a non-virtual override here would run the
+    // base version and leave Script<N>'s typed handle unbuilt.
+    virtual void bind_to(Node* host) { owner = host; }
 
 private:
-    // Not a weak_ptr: the node owns this script, so a cycle is impossible and the
-    // pointer needs no invalidation.
+    // Not a weak_ptr: the node owns this script, so a cycle is impossible. It
+    // does not need invalidating either, because a script is destroyed only by
+    // its own node's destructor - see the ownership note above.
     Node* owner = nullptr;
     std::string script_name = "Unnamed Script";
+};
+
+/*
+    A script that knows what kind of node it belongs to.
+
+    N is the concrete node type: Script<Node2D>, Script<NodeButton>, or plain
+    Script for a node you do not care to narrow. Inside a callback, node is a
+    ready-to-use N*, so reaching a property needs no cast and no call to
+    get_owner_as<T>().
+
+    Binding a Script<N> to a node that is not an N is a programming error and is
+    reported as such: bind_to throws std::invalid_argument rather than handing you
+    a typed pointer that points at the wrong object. That check is a runtime
+    dynamic_cast, not a compile-time one, because attach_script<T>() cannot know the
+    type of the node calling it.
+*/
+template<typename N = Node>
+class Script : public ScriptBase {
+public:
+    // Publishes N so that Node::attach_script<T>() can read it off a script type:
+    // it asserts N is a Node type, and that the script came from this template
+    // rather than from ScriptBase directly. See has_node_type in Node.hpp.
+    using node_type = N;
+
+protected:
+    // The owner, as its concrete type. Non-null for as long as this script is
+    // bound to a node, which is the whole of every callback's duration: the node
+    // owns us, so it cannot be destroyed underneath a running method.
+    N* node = nullptr;
+
+    void bind_to(Node* host) override {
+        // Checked before touching any state, so a rejected bind leaves the
+        // script exactly as unbound as it was.
+        N* typed = dynamic_cast<N*>(host);
+        if (!typed) {
+            throw std::invalid_argument(
+                "Script<N>::bind_to: the host node is not of the node type this "
+                "script was declared for.");
+        }
+        ScriptBase::bind_to(host);
+        node = typed;
+    }
 };
 
 } // namespace guayaba

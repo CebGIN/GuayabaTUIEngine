@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 
+#include <guayaba/Core/NodeRef.hpp>
 #include <guayaba/Core/NodeRegistry.hpp>
 
 namespace guayaba {
@@ -80,11 +81,13 @@ inline void drain_pending_deletions() {
 
         Node* node = NodeRegistry::instance().resolve(id);
         if (node == nullptr) continue;        // already gone inside an ancestor
-        if (node->get_parent() == nullptr) continue; // consumer owns it now
+
+        const NodeRef<Node> parent_ref = node->get_parent();
+        if (!parent_ref) continue;            // consumer owns it now
 
         // Still owned by its parent's unique_ptr; reclaiming it here is what
         // actually destroys it, subtree and all.
-        std::unique_ptr<Node> owned = node->get_parent()->remove_child(node);
+        std::unique_ptr<Node> owned = parent_ref.get()->remove_child(node->child_index());
     }
 
     while (!state.detached.empty()) {

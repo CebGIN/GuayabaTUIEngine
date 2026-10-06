@@ -1,3 +1,4 @@
+#include <guayaba/Core/NodeRef.hpp>
 #include <guayaba/Nodes/Node2D.hpp>
 
 namespace guayaba {
@@ -29,7 +30,7 @@ Vec2 Node2D::get_global_position() const {
     if (is_cached_position_valid) return cached_global_position;
     Vec2 global_pos = position;
 
-    if (Node2D* parent2D = get_parent_of_type<Node2D>()) {
+    if (const NodeRef<Node2D> parent2D = get_parent_of_type<Node2D>()) {
         global_pos = global_pos + parent2D->get_global_position();
     }
 

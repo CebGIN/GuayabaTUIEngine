@@ -23,12 +23,11 @@ void SceneManager::process_scene() {
     root_node->update(m_deltaTime);
 }
 
-Node* SceneManager::get_current_scene() {
-    return root_node.get();
+NodeRef<Node> SceneManager::get_current_scene() {
+    return NodeRef<Node>(root_node.get());
 }
 
 void SceneManager::change_scene(std::unique_ptr<Node> new_root) {
-    if (new_root == root_node) return;
     next_scene = std::move(new_root);
 }
 
@@ -52,15 +51,12 @@ void SceneManager::start_running() {
     ConsoleRenderer renderer(buffer_size, os_terminal.get());
 
     while (this->is_running) {
-
+        
+        //Cambio de escena
         if (next_scene){
-            if (root_node) {
-                root_node->exit_tree();
-            }
+            if (root_node) root_node->exit_tree();
             root_node = std::move(next_scene);
-            if (root_node) {
-                root_node->enter_tree();
-            }
+            if (root_node) root_node->enter_tree();
         }
 
         if (this->is_running && this->root_node) {

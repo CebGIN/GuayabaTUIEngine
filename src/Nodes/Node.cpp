@@ -1,6 +1,8 @@
 #include <algorithm>
 
+#include <guayaba/Core/NodeRef.hpp>
 #include <guayaba/Core/Script.hpp>
+#include <guayaba/Core/ScriptRef.hpp>
 #include <guayaba/Nodes/Node.hpp>
 
 #include "../Core/DeletionQueue.hpp"
@@ -26,6 +28,11 @@ Node::Node(std::string node_name) : name(std::move(node_name)) {
 }
 
 Node::~Node() {
+    // Last chance to tell the script it is going away. This runs before any
+    // member is destroyed, so `children` and `parent` are still intact and a
+    // script's `node` reads as a coherent node - do not free it from here.
+    if (script) script->on_detached();
+
     // The one place the registry is told. Every destruction path - the parent's
     // unique_ptr, the deletion queue, stack unwinding - arrives here, so there is
     // no way to free a node without the id being invalidated.
@@ -49,6 +56,13 @@ void Node::exit_tree() {
 }
 
 std::string Node::make_child_name_unique(const std::string& wanted) const {
+    // Paths are compared as strings now (is_ancestor_of, get_path_to), so a '/'
+    // inside a name would split into two segments and make two distinct nodes
+    // look like the same path.
+    if (wanted.find('/') != std::string::npos) {
+        throw std::logic_error("Node: name '" + wanted + "' cannot contain '/'.");
+    }
+
     auto taken = [this](const std::string& candidate) {
         for (const auto& child : children) {
             if (child->name == candidate) return true;
@@ -64,18 +78,14 @@ std::string Node::make_child_name_unique(const std::string& wanted) const {
     }
 }
 
-Node* Node::add_child(std::unique_ptr<Node> child) {
-    if (!child) return nullptr;
+NodeRef<Node> Node::add_child(std::unique_ptr<Node> child) {
+    if (!child) return NodeRef<Node>();
 
     if (child.get() == this) {
         throw std::logic_error("Node::add_child: '" + name + "' cannot be its own child.");
     }
-    if (child->parent != nullptr) {
-        throw std::logic_error("Node::add_child: '" + child->name
-            + "' already has a parent '" + child->parent->name
-            + "'. Use reparent() to move it.");
-    }
-    if (child->is_ancestor_of(this)) {
+
+    if (child->is_ancestor_of(get_path())) {
         throw std::logic_error("Node::add_child: '" + child->name + "' is an ancestor of '"
             + name + "', so this would create a cycle.");
     }
@@ -83,64 +93,64 @@ Node* Node::add_child(std::unique_ptr<Node> child) {
     child->name = make_child_name_unique(child->name);
     child->parent = this;
 
+    // Only this one is stamped: push_back appends, so nothing else moves.
+    child->child_index_ = children.size();
+
     Node* handle = child.get();
     children.push_back(std::move(child));
 
     if (in_tree) handle->enter_tree();
-    return handle;
+    return NodeRef<Node>(handle);
 }
 
 std::unique_ptr<Node> Node::detach_ownership() {
     std::unique_ptr<Node> owned;
     if (parent != nullptr) {
-        owned = parent->remove_child(this);
+        owned = parent->remove_child(child_index_);
     }
     return owned;
 }
 
-std::unique_ptr<Node> Node::remove_child(Node* child) {
-    if (child == nullptr || child->parent != this) return nullptr;
+std::unique_ptr<Node> Node::remove_child(size_t index) {
+    if (index >= children.size()) {
+        throw std::out_of_range("Node::remove_child: Index out of bounds. en: " + name);
+    }
+
+    Node* child = children[index].get();
 
     // Leave the tree before the subtree is torn down, so every descendant's
     // on_exit_tree fires while the tree is still coherent.
     if (child->in_tree) child->exit_tree();
 
-    const auto it = std::find_if(children.begin(), children.end(),
-        [child](const std::unique_ptr<Node>& held) { return held.get() == child; });
-    if (it == children.end()) return nullptr;
+    std::unique_ptr<Node> owned = std::move(children[index]);
+    children.erase(children.begin() + static_cast<std::ptrdiff_t>(index));
 
-    std::unique_ptr<Node> owned = std::move(*it);
-    children.erase(it);
+    // Everything after the hole moved down one; the detached child no longer has
+    // a slot here at all.
+    reindex_from(index);
 
     child->parent = nullptr;
+    child->child_index_ = SIZE_MAX;
     child->invalidate_cache_recursively();
     return owned;
 }
 
-void Node::reparent(Node* new_parent) {
-    if (new_parent == nullptr) {
-        throw std::logic_error("Node::reparent: new parent cannot be null.");
+void Node::reindex_from(size_t start) {
+    for (size_t i = start; i < children.size(); ++i) {
+        children[i]->child_index_ = i;
     }
+}
+
+std::unique_ptr<Node> Node::steal() {
     if (parent == nullptr) {
-        throw std::logic_error("Node::reparent: '" + name + "' has no parent to move from.");
+        // A root is owned by whoever created it, or by the SceneManager for an
+        // active scene. Neither is reachable from here, so claiming it here
+        // would be claiming a node whose owner we cannot see.
+        throw std::logic_error("Node::steal: '" + name + "' has no parent, so there is no"
+            " tree to take it from. Use change_scene(nullptr) or take_scene() to release"
+            " a scene root.");
     }
-    if (new_parent == this) {
-        throw std::logic_error("Node::reparent: '" + name + "' cannot be reparented to itself.");
-    }
-    if (new_parent == parent) return;
-
-    if (new_parent->is_ancestor_of(this)) {
-        throw std::logic_error("Node::reparent: '" + new_parent->name + "' is a descendant of '"
-            + name + "', so this would create a cycle.");
-    }
-
-    // Take ownership back first: the unique_ptr in the old parent is what we are
-    // moving, and add_child() requires an unparented node.
-    std::unique_ptr<Node> owned = parent->remove_child(this);
-    if (!owned) {
-        throw std::logic_error("Node::reparent: '" + name + "' was detached mid-call.");
-    }
-    new_parent->add_child(std::move(owned));
+    return parent->remove_child(child_index_);
 }
 
 void Node::free() {
@@ -175,41 +185,42 @@ void Node::queue_free() {
 }
 
 bool Node::has_child(const std::string& child_name) const {
-    return find_child(child_name, false) != nullptr;
+    return static_cast<bool>(find_child(child_name, false));
 }
 
-int Node::get_index(Node* child) const {
-    for (size_t i = 0; i < children.size(); ++i) {
-        if (children[i].get() == child) return static_cast<int>(i);
-    }
-    return -1;
-}
-
-void Node::move_child(Node* child, size_t to_index) {
-    if (child == nullptr || child->parent != this) {
-        throw std::logic_error("Node::move_child: node is not a child of '" + name + "'.");
-    }
-    if (to_index >= children.size()) {
+void Node::move_child(size_t from, size_t to) {
+    if (from >= children.size() || to >= children.size()) {
         throw std::out_of_range("Node::move_child: Index out of bounds. en: " + name);
     }
 
-    const auto it = std::find_if(children.begin(), children.end(),
-        [child](const std::unique_ptr<Node>& held) { return held.get() == child; });
-    if (it == children.end()) return;
+    // `to` is the position the node ends up at. After the erase the vector is one
+    // shorter, and its indices already line up with the final positions - the
+    // nodes between `from` and `to` have each shifted down one, which is what
+    // leaves room for the insert. So `to` needs no adjustment either way, and
+    // to == from is a no-op rather than a self-insert.
+    std::unique_ptr<Node> owned = std::move(children[from]);
+    children.erase(children.begin() + static_cast<std::ptrdiff_t>(from));
+    children.insert(children.begin() + static_cast<std::ptrdiff_t>(to), std::move(owned));
 
-    std::unique_ptr<Node> owned = std::move(*it);
-    children.erase(it);
-    children.insert(children.begin() + static_cast<std::ptrdiff_t>(to_index), std::move(owned));
+    // Both halves of this reshuffle moved things, so the whole vector is stale.
+    reindex_from(0);
 }
 
-Node* Node::find_child(const std::string& wanted_name, bool recursive) const {
+NodeRef<Node> Node::get_parent() const {
+    // A root has no parent, and the NodeRef(N*) constructor dereferences to read
+    // the id, so it cannot be handed a null.
+    return parent != nullptr ? NodeRef<Node>(parent) : NodeRef<Node>();
+}
+
+NodeRef<Node> Node::find_child(const std::string& wanted_name, bool recursive) const {
     for (const auto& child : children) {
-        if (child->name == wanted_name) return child.get();
+        if (child->name == wanted_name) return NodeRef<Node>(child.get());
         if (recursive) {
-            if (Node* found = child->find_child(wanted_name, true)) return found;
+            const NodeRef<Node> found = child->find_child(wanted_name, true);
+            if (found) return found;
         }
     }
-    return nullptr;
+    return NodeRef<Node>();
 }
 
 Node* Node::resolve_path(const std::string& path) const {
@@ -247,7 +258,7 @@ Node* Node::resolve_path(const std::string& path) const {
                 // Reached only by the leading segment of an absolute path.
                 if (segment == root->name) next = root;
             } else {
-                next = current->find_child(segment, false);
+                next = current->find_child(segment, false).get();
             }
 
             if (next == nullptr) return nullptr;
@@ -259,6 +270,16 @@ Node* Node::resolve_path(const std::string& path) const {
     }
 
     return current;
+}
+
+bool Node::is_ancestor_of(const std::string& path) const {
+    // Names cannot contain '/', so a path is strictly longer than this node's
+    // and still prefixed by it only when it names a descendant. Equal counts too:
+    // a node is its own ancestor, which is what the old pointer walk reported.
+    const std::string mine = get_path();
+    if (path == mine) return true;
+    if (path.size() <= mine.size()) return false;
+    return path.compare(0, mine.size(), mine) == 0 && path[mine.size()] == '/';
 }
 
 std::string Node::get_path() const {
@@ -277,16 +298,25 @@ std::string Node::get_path() const {
     return path;
 }
 
-std::string Node::get_path_to(const Node* other) const {
-    if (other == nullptr) return "";
+std::string Node::get_path_to(const std::string& target) const {
+    const auto segments = [](const std::string& p) {
+        std::vector<std::string> out;
+        size_t pos = 1;                        // skip the leading '/'
+        while (pos <= p.size()) {
+            const size_t slash = p.find('/', pos);
+            const std::string seg =
+                p.substr(pos, slash == std::string::npos ? std::string::npos : slash - pos);
+            if (!seg.empty()) out.push_back(seg);
+            if (slash == std::string::npos) break;
+            pos = slash + 1;
+        }
+        return out;
+    };
 
-    // Both chains root-first, so the shared prefix is the common ancestor.
-    std::vector<const Node*> from_chain;
-    std::vector<const Node*> to_chain;
-    for (const Node* n = this; n != nullptr; n = n->parent) from_chain.push_back(n);
-    for (const Node* n = other; n != nullptr; n = n->parent) to_chain.push_back(n);
-    std::reverse(from_chain.begin(), from_chain.end());
-    std::reverse(to_chain.begin(), to_chain.end());
+    // Both root-first, so the shared prefix is the common ancestor. Working on
+    // strings rather than nodes is what lets this answer for a freed node.
+    const std::vector<std::string> from_chain = segments(get_path());
+    const std::vector<std::string> to_chain = segments(target);
 
     size_t common = 0;
     while (common < from_chain.size() && common < to_chain.size()
@@ -294,13 +324,13 @@ std::string Node::get_path_to(const Node* other) const {
         ++common;
     }
 
-    std::string path;
-    for (size_t i = common; i < from_chain.size(); ++i) path += "/..";
+    std::string result;
+    for (size_t i = common; i < from_chain.size(); ++i) result += "/..";
     for (size_t i = common; i < to_chain.size(); ++i) {
-        path += "/";
-        path += to_chain[i]->get_name();
+        result += "/";
+        result += to_chain[i];
     }
-    return path.empty() ? "." : path;
+    return result.empty() ? "." : result;
 }
 
 Node* Node::resolve_instance_id(uint64_t id) {
@@ -327,27 +357,28 @@ void Node::draw(ConsoleRenderer& renderer) {
     for_each_child([&renderer](Node* child) { child->draw(renderer); });
 }
 
-void Node::attach_script(std::unique_ptr<Script> new_script) {
+void Node::attach_script(std::unique_ptr<ScriptBase> new_script) {
     if (!new_script) return;
 
-    // No "already bound" guard here, and it must stay that way: the parameter
-    // owns the script by the time any check would run, so returning early would
-    // destroy a script the previous host still points at. There is also nothing
-    // to guard - ownership moved into the node and detach_script() destroys
-    // rather than returning, so no bound script can arrive here again.
-    detach_script();
+    // Sealed on the first successful attach and never reopened, so a script
+    // lives exactly as long as its node. This is the rule ScriptRef's cast-free
+    // script() depends on: see Core/ScriptRef.hpp.
+    if (script_sealed) {
+        throw std::logic_error("Node::attach_script: '" + name + "' already has a script, and a script"
+            " is kept for as long as its node. Detaching does not exist, so build the subtree"
+            " before handing the node to a scene.");
+    }
 
+    // Throws if the Script isn't for this NodeType. Checked before anything is
+    // stored or sealed, so a rejected attach leaves the node exactly as it was.
+    new_script->bind_to(this);
     script = std::move(new_script);
-    script->bind_to(this);
+    script_sealed = true;
 
-    if (is_in_tree()) script->on_attached();
-}
-
-void Node::detach_script() {
-    if (!script) return;
-    if (is_in_tree()) script->on_detached();
-    script->unbind();
-    script.reset();
+    // Unconditional now: binding only happens while building, which is exactly
+    // when this is worth saying. It used to be gated on is_in_tree(), which made
+    // it fire only for the runtime attach that no longer exists.
+    script->on_attached();
 }
 
 void Node::invalidate_cache_recursively() {

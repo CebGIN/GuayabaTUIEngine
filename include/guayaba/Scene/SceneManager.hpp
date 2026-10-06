@@ -4,6 +4,7 @@
 #include <chrono>
 #include <memory>
 
+#include <guayaba/Core/NodeRef.hpp>
 #include <guayaba/Core/Vec2.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
 
@@ -41,10 +42,11 @@ class SceneManager {
 
         void process_scene();
 
-        // Non-owning. Null once the scene is gone.
-        Node* get_current_scene();
+// Non-owning. Empty once the scene is gone - including when the scene is
+    // swapped out from under a handle you were holding.
+    NodeRef<Node> get_current_scene();
 
-        // The manager takes ownership. Passing a root it already holds is a no-op.
+        // The manager takes ownership.
         void change_scene(std::unique_ptr<Node> new_root);
 
         // Hands the current root back to the caller, who becomes responsible for

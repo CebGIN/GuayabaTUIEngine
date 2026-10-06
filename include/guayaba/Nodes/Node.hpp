@@ -2,6 +2,7 @@
 #define GUAYABA_NODES_NODE_HPP
 
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -16,7 +17,27 @@ namespace guayaba {
 
 class SceneManager;
 class ConsoleRenderer;
-class Script;
+class ScriptBase;
+
+template<typename N>
+class NodeRef;
+
+template<typename N, typename S>
+class ScriptRef;
+
+namespace detail {
+
+// Detects the marker Script<N> carries, so that attach_script<T>() can reject a T
+// written against ScriptBase directly with a readable message instead of a
+// "no type named node_type" cascade. The body that would need node_type is only
+// instantiated once this says yes, so the failure lands on the static_assert.
+template<typename T, typename = void>
+struct has_node_type : std::false_type {};
+
+template<typename T>
+struct has_node_type<T, std::void_t<typename T::node_type>> : std::true_type {};
+
+} // namespace detail
 
 /*
     OWNERSHIP
@@ -27,14 +48,18 @@ class Script;
     The rule that follows: a node belongs to whoever created it right up to the
     moment it is handed over, and to the tree from then on.
 
-        auto root = std::make_unique<Node>("root");   // you own it
-        NodeUI* title = root->add_child<NodeUI>(...); // tree owns it now
+        auto root = std::make_unique<Node>("root");      // you own it
+        NodeRef<NodeUI> title = root->add_child<NodeUI>(...); // tree owns it now
         SceneManager::get_instance().change_scene(std::move(root));
 
-    Once handed over you hold only a raw T*, which is safe as long as the node is
-    inside the subtree that contains you - ancestors and same-subtree nodes
-    cannot be freed ahead of you. For references that cross that boundary use
-    NodeRef<T>: see NodeRef.hpp for why raw is not enough there.
+    Nothing that names a node hands out a raw pointer. Every reference is a
+    NodeRef<T>, which holds an id rather than an address and so answers nullptr
+    once the node is gone instead of dangling. To reach the node, call get() and
+    check it; see NodeRef.hpp.
+
+    Children are named three ways, and none of them needs the tree walked to be
+    safe: child_index() for position, get_path()/is_ancestor_of() for
+    relationship, and NodeRef for identity across a free.
 
     Non-copyable: a copy would duplicate the instance id, leaving one slot
     pointing at two nodes, and the first destructor to run would invalidate the
@@ -43,14 +68,25 @@ class Script;
 class Node {
     friend class SceneManager;
 
+    // Reads the script without downcasting. ScriptRef needs the raw pointer to
+    // static_cast it, which it can only justify because of script_sealed below.
+    template<typename, typename>
+    friend class ScriptRef;
+
 protected:
     std::vector<std::unique_ptr<Node>> children;
     Node* parent = nullptr;
     std::string name;
-    std::unique_ptr<Script> script;
+    std::unique_ptr<ScriptBase> script;
 
     mutable bool in_tree = false;
     bool queued_for_deletion = false;
+
+    // Set on the first successful attach and never cleared. A script lives
+    // exactly as long as its node from that point on, which is what lets a
+    // ScriptRef re-derive the script from the node's id without holding a
+    // pointer that could dangle. See Core/ScriptRef.hpp.
+    bool script_sealed = false;
 
     virtual void enter_tree();
     virtual void exit_tree();
@@ -65,11 +101,26 @@ protected:
 private:
     uint64_t instance_id_ = detail::NodeRegistry::INVALID_ID;
 
+    // This node's slot in its parent's children, or SIZE_MAX when it has no
+    // parent. Maintained by the parent: only remove_child() and move_child()
+    // shift anything, since add_child() appends. Read it through
+    // child_index(), and read it fresh at the point of use - storing the number
+    // across a mutation is what makes it mean something else by then.
+    size_t child_index_ = SIZE_MAX;
+
+    // The script as a ScriptBase*, for ScriptRef to narrow itself. Deliberately
+    // private: narrowing to S is only sound because the slot is sealed.
+    ScriptBase* script_raw() const { return script.get(); }
+
     // Hands this node's ownership to the caller: unparents, leaves the tree,
     // fires on_exit_tree. Used by remove_child and by the deletion path.
     std::unique_ptr<Node> detach_ownership();
 
     std::string make_child_name_unique(const std::string& wanted) const;
+
+    // Restores child_index_ after children have shifted. Only remove_child() and
+    // move_child() need this: add_child() appends, so nothing moves.
+    void reindex_from(size_t start);
 
     Node* resolve_path(const std::string& path) const;
 
@@ -87,26 +138,39 @@ public:
 
     // Constructs in place and hands the ownership to this node. A duplicate
     // sibling name becomes "name@2", so paths stay unambiguous.
+    // The definition lives in Core/NodeRef.hpp: returning a NodeRef by value
+    // needs the complete type, and that header includes this one.
     template<typename T, typename... Args>
-    T* add_child(Args&&... args) {
-        static_assert(std::is_base_of<Node, T>::value, "T must be a Node type.");
-        std::unique_ptr<Node> owned(new T(std::forward<Args>(args)...));
-        T* handle = static_cast<T*>(owned.get());
-        add_child(std::move(owned));
-        return handle;
-    }
+    NodeRef<T> add_child(Args&&... args);
 
-    // The ownership hand-off. A node that already has a parent is rejected: use
-    // reparent(), which leaves the old tree properly first.
-    Node* add_child(std::unique_ptr<Node> child);
+    // The ownership hand-off. A node that already has a parent is rejected: take
+    // it back with remove_child(index) and add it to the new parent yourself.
+    // Adding a child to its own current parent appends it, which changes draw
+    // order; there is no same-parent no-op here.
+    NodeRef<Node> add_child(std::unique_ptr<Node> child);
 
     // Detaches and hands ownership back. Never destroys, so unlike Godot's
     // remove_child() it cannot produce an orphan you forgot to free - if you
     // drop the returned unique_ptr, the subtree goes with it.
-    std::unique_ptr<Node> remove_child(Node* child);
+    //
+    // Takes the child's slot, from child_index(). Removing a node that is not a
+    // child of this one is a programming error and throws, rather than quietly
+    // returning nullptr.
+    std::unique_ptr<Node> remove_child(size_t index);
 
-    // remove_child + add_child, with enter_tree/exit_tree handled in between.
-    void reparent(Node* new_parent);
+    // The same hand-off, asked from the node's own side. Useful when you are
+    // holding a NodeRef to the child rather than to its parent, since it saves
+    // walking up to the parent and back down to the index:
+    //
+    //     std::unique_ptr<Node> mio = ref.get()->steal();
+    //
+    // Equivalent to parent->remove_child(child_index()). Never destroys, so
+    // dropping the result takes the subtree with it.
+    //
+    // Throws when the node has no parent: a root belongs to whoever created it,
+    // or to the SceneManager, and this does not reach them. Use take_scene() or
+    // change_scene(nullptr) for a scene root.
+    std::unique_ptr<Node> steal();
 
     // --- Destruction --------------------------------------------------------
 
@@ -127,70 +191,69 @@ public:
 
     // --- Tree navigation ----------------------------------------------------
 
-    Node* get_parent() const { return parent; }
+    NodeRef<Node> get_parent() const;
 
+    // Empty when no ancestor has type T.
     template<typename T>
-    T* get_parent_of_type() const {
-        static_assert(std::is_base_of<Node, T>::value, "T must be a Node type.");
-        for (Node* p = parent; p != nullptr; p = p->parent) {
-            if (T* typed = dynamic_cast<T*>(p)) return typed;
-        }
-        return nullptr;
-    }
+    NodeRef<T> get_parent_of_type() const;
 
     bool is_root() const { return parent == nullptr; }
 
-    // True when this node sits somewhere above the argument. Used to reject
-    // add_child()/reparent() calls that would close a loop.
-    bool is_ancestor_of(const Node* other) const {
-        for (const Node* n = other; n != nullptr; n = n->parent) {
-            if (n == this) return true;
-        }
-        return false;
-    }
+    // True when the given path names this node or something below it. Used to
+    // reject an add_child() that would close a loop.
+    //
+    // Compares path strings, so it is scoped to one tree: two unrelated trees
+    // can each contain "/root/a", and this would report a relationship that
+    // does not exist. That direction is safe - add_child() turns a false
+    // positive into a refused add rather than an actual cycle.
+    //
+    //     child->is_ancestor_of(parent->get_path())
+    bool is_ancestor_of(const std::string& path) const;
 
     size_t get_child_count() const { return children.size(); }
 
+    // This node's slot in its parent, or SIZE_MAX when it has no parent. Read
+    // it where you use it; a stored number stops naming this child once a
+    // sibling before it is added or removed.
+    size_t child_index() const { return child_index_; }
+
+    // Throws if the index is out of bounds, or if the child there is not a T.
     template<typename T = Node>
-    T* get_child(size_t index) const {
-        static_assert(std::is_base_of<Node, T>::value, "T must be a Node type.");
-        if (index >= children.size()) {
-            throw std::out_of_range("Node::get_child(index): Index out of bounds. en: " + name);
-        }
-        return static_cast<T*>(children[index].get());
-    }
+    NodeRef<T> get_child(size_t index) const;
 
     bool has_child(const std::string& child_name) const;
 
-    // Draw order follows child order, so this is z-order.
-    int get_index(Node* child) const;
-    void move_child(Node* child, size_t to_index);
+    // Draw order follows child order, so this is z-order. `to` is the final
+    // position, after the move, not the one the shifted-out node ends up in.
+    void move_child(size_t from, size_t to);
 
     // "a/b", "/a/b", "." and ".." are all understood, resolved against the tree
-    // rather than stored, so a NodeRef plus a path survives reparenting.
+    // rather than stored, so a NodeRef plus a path survives being moved.
+    // Throws when there is no node there.
     template<typename T = Node>
-    T* get_node(const std::string& path) const {
-        T* found = get_node_or_null<T>(path);
-        if (!found) {
-            throw std::runtime_error("Node::get_node(path): No node at \"" + path + "\" from \"" + get_path() + "\".");
-        }
-        return found;
-    }
+    NodeRef<T> get_node(const std::string& path) const;
 
+    // Empty rather than throwing when the path names nothing.
     template<typename T = Node>
-    T* get_node_or_null(const std::string& path) const {
-        static_assert(std::is_base_of<Node, T>::value, "T must be a Node type.");
-        return static_cast<T*>(resolve_path(path));
-    }
+    NodeRef<T> get_node_or_null(const std::string& path) const;
 
-    // Pre-order, first match wins.
-    Node* find_child(const std::string& wanted_name, bool recursive = true) const;
+    // Pre-order, first match wins. Empty when there is no such child.
+    NodeRef<Node> find_child(const std::string& wanted_name, bool recursive = true) const;
 
+    // Absolute, from the topmost ancestor. Names cannot contain '/', so a path
+    // is unambiguous within one tree.
     std::string get_path() const;
-    std::string get_path_to(const Node* other) const;
+
+    // The path from this node to the given path, or "." when they are the same
+    // node. Takes a path rather than a node, so it also answers for a node that
+    // has already been freed.
+    std::string get_path_to(const std::string& path) const;
 
     // --- Identity -----------------------------------------------------------
 
+    // Where to put a child named this. Called by add_child, so a name that
+    // cannot be addressed is refused at construction rather than producing a
+    // path that resolves to something else.
     const std::string& get_name() const { return name; }
 
     uint64_t instance_id() const { return instance_id_; }
@@ -213,33 +276,36 @@ public:
     // and draw MUST end with Node::update(...) / Node::draw(...).
     virtual void update(double delta_time);
 
-    // At most one script per node, owned by it. A node outliving its script is
-    // what makes Script::get_owner() safe without any check: while your method
-    // runs, this node is guaranteed alive.
-    template<typename T, typename... Args>
-    T* add_script(Args&&... args) {
-        static_assert(std::is_base_of<Script, T>::value, "T must be a Script type.");
-        std::unique_ptr<Script> owned(new T(std::forward<Args>(args)...));
-        T* handle = static_cast<T*>(owned.get());
-        attach_script(std::move(owned));
-        return handle;
-    }
+    // Builds a script in place, attaches it, and hands back a safe reference to
+    // it. The node owns the script from here on:
+    //
+    //     ScriptRef<Node2D, Blinker> b = node->attach_script<Blinker>();
+    //     b.script()->period = 0.2;
+    //
+    // Attach is build-time only: once a node has a script it keeps that script
+    // until the node is destroyed, so a second attach throws rather than
+    // invalidating whatever held the first one. Detaching does not exist.
+    //
+    // The definition lives in Core/ScriptRef.hpp because returning ScriptRef by
+    // value needs the complete type, and that header includes this one.
+    template<typename S, typename... Args>
+    ScriptRef<typename S::node_type, S> attach_script(Args&&... args);
 
-    // Attaching nullptr is a no-op. Replacing this node's own script fires
-    // on_detached on the old one.
-    void attach_script(std::unique_ptr<Script> new_script);
-
-    void detach_script();
+    // Attaches an already-built script. Returns void because with no S on the
+    // caller's side there is no type to hand back a ScriptRef as.
+    void attach_script(std::unique_ptr<ScriptBase> new_script);
 
     bool has_script() const { return static_cast<bool>(script); }
 
-    // You normally kept the handle add_script<T>() returned. This is for when
-    // you hold nothing but the node.
-    template<typename T>
-    T* get_script_as() const {
-        static_assert(std::is_base_of<Script, T>::value, "T must be a Script type.");
-        return dynamic_cast<T*>(script.get());
-    }
+    // Asks whether this node currently holds a script of type S. A query, so a
+    // mismatch yields an empty ScriptRef rather than throwing; use
+    // attach_script<S>() when you want the node's script to BE an S.
+    //
+    // S must derive from Script<N>, for the same reason attach_script<S>()
+    // requires it: naming node_type is what lets the answer stay cast-free.
+    // That does rule out asking about a plain ScriptBase.
+    template<typename S>
+    ScriptRef<typename S::node_type, S> get_script_as() const;
 
     virtual void draw(ConsoleRenderer& renderer);
 
