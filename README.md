@@ -532,14 +532,13 @@ estar ahi. Llama a `clear()` donde signifique algo.
 
 ### Señales que ya emite el motor
 
-`NodeButton` declara `clicked` en su constructor y lo dispara en `handle_click()`, antes de
-llamar al `on_click` de siempre. Las dos vias conviven y ninguna sustituye a la otra:
+`NodeButton` declara `clicked` en su constructor y lo dispara en `handle_click()`. Esa señal
+es la unica via que tiene un boton: antes tambien aceptaba un `set_on_click`, y entonces
+decir "este boton hace algo" tenia dos respuestas distintas, de las que solo una podia
+usarse a la vez. Un boton con dos reactores es un boton con una señal y dos oyentes.
 
 ```cpp
-// Con handle: lo que ya habia.
-salir->set_on_click([]{ SceneManager::get_instance().stop_running(); });
-
-// Con señal: permite conectarse sin guardar un handle al boton.
+// No hace falta guardar el handle al boton para oírlo.
 salir->connect_script_signal("clicked", this, &MiScript::salir);
 ```
 
