@@ -33,16 +33,11 @@ void NodeButton::update_hover(const Vec2 mouse_global_pos) {
 void NodeButton::handle_click() {
     if (!(Input::l_click_just_pressed && hovered)) return;
 
-    // The signal is the decoupled route: a reactor elsewhere connects to it without
-    // anyone having to keep a handle to this button. on_click below is the older,
-    // equally valid one-callback-per-button route, and both fire.
+    // The signal is the only route. A button used to also carry a single
+    // set_on_click callback, which meant two ways to say the same thing and no way
+    // to say it twice: one signal serves any number of reactors, and a reactor
+    // does not need a handle to this button to hear it.
     emit_signal("clicked");
-
-    if (on_click) on_click();
-}
-
-void NodeButton::set_on_click(std::function<void()> callback) {
-    on_click = callback;
 }
 
 void NodeButton::draw(ConsoleRenderer& renderer) {

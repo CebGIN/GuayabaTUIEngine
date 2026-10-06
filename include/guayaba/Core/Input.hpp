@@ -36,7 +36,7 @@ std::string get_line_input(Vec2 position = {0, 0});
     are emitted from refresh_input(), which the frame loop calls before
     process_scene(), so a reactor sees the event in the same frame.
 
-        bus().connect_script_signal("mouse_clicked", this, &MyScript::on_click);
+        bus().connect_script_signal("mouse_clicked", this, &MyScript::al_hacer_click);
 
     HOW THE PAYLOADS ARE SHAPED
     They are checked at the connect call, not at the emit: a reactor for

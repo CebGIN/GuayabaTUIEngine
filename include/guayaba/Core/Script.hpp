@@ -82,7 +82,7 @@ class ConsoleRenderer;
             // a signal on some other node, owned by this script
             connect_script_signal("murio", enemigo.get(), this, &Blinker::al_morir);
             // and one on the bus
-            bus().connect_script_signal("mouse_clicked", this, &Blinker::on_click);
+            bus().connect_script_signal("mouse_clicked", this, &Blinker::al_hacer_click);
         }
         void on_danio(int d) { vida -= d; }
 
