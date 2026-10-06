@@ -178,7 +178,13 @@ public:
     // it back with remove_child(index) and add it to the new parent yourself.
     // Adding a child to its own current parent appends it, which changes draw
     // order; there is no same-parent no-op here.
-    NodeRef<Node> add_child(std::unique_ptr<Node> child);
+    // By rvalue reference, not by value, so that a rejected add leaves the
+    // caller holding what it passed in. Taking by value moves the subtree into
+    // the parameter before the cycle check runs, so throwing here destroyed a
+    // node the caller still believed it owned - and it is about to be destroyed
+    // again at end of scope. attach_script() has always worked the other way
+    // round, on purpose.
+    NodeRef<Node> add_child(std::unique_ptr<Node>&& child);
 
     // Detaches and hands ownership back. Never destroys, so unlike Godot's
     // remove_child() it cannot produce an orphan you forgot to free - if you

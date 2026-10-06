@@ -78,16 +78,25 @@ std::string Node::make_child_name_unique(const std::string& wanted) const {
     }
 }
 
-NodeRef<Node> Node::add_child(std::unique_ptr<Node> child) {
+NodeRef<Node> Node::add_child(std::unique_ptr<Node>&& child) {
     if (!child) return NodeRef<Node>();
 
     if (child.get() == this) {
         throw std::logic_error("Node::add_child: '" + name + "' cannot be its own child.");
     }
 
-    if (child->is_ancestor_of(get_path())) {
-        throw std::logic_error("Node::add_child: '" + child->name + "' is an ancestor of '"
-            + name + "', so this would create a cycle.");
+    // Ancestry is checked by pointer, not by path. Comparing paths cannot tell
+    // two distinct nodes apart, and unnamed nodes all share the path
+    // "/Unnamed Node": asking whether an unnamed orphan was an ancestor of
+    // another unnamed orphan therefore answers yes, and the tree could never be
+    // built out of nodes that were never named - which is what an unnamed node
+    // is for. get_path()/is_ancestor_of() stay for what they are good at,
+    // comparing paths that came from somewhere else.
+    for (const Node* up = this; up != nullptr; up = up->parent) {
+        if (up == child.get()) {
+            throw std::logic_error("Node::add_child: '" + child->name + "' is an ancestor of '"
+                + name + "', so this would create a cycle.");
+        }
     }
 
     child->name = make_child_name_unique(child->name);
