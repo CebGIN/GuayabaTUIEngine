@@ -55,6 +55,20 @@ Node* NodeRegistry::resolve(uint64_t id) const {
     return slots_[slot].node;
 }
 
+bool NodeRegistry::is_live(uint64_t id) const {
+    if (id == INVALID_ID) return false;
+
+    const uint32_t slot = static_cast<uint32_t>(id & SLOT_MASK);
+    if (slot >= slots_.size()) return false;
+
+    // Not resolve() != nullptr: an occupied slot proves some node is there, and
+    // the generation is what proves it is the one this id was minted for.
+    const uint32_t generation = static_cast<uint32_t>(id >> SLOT_BITS);
+    if (slots_[slot].generation != generation) return false;
+
+    return slots_[slot].node != nullptr;
+}
+
 size_t NodeRegistry::live_count() const {
     return live_count_;
 }

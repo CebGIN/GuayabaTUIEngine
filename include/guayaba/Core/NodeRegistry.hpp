@@ -68,6 +68,16 @@ public:
     // nullptr once the node has been freed, even if its slot was reused.
     Node* resolve(uint64_t id) const;
 
+    // Whether that id still names a live node. resolve() == nullptr would do,
+    // except that a caller holding a raw Node* wants to know whether *that
+    // pointer* is still the node it was, and a fresh node constructed into the
+    // freed address makes resolve() non-null while saying nothing about whether
+    // it is the same object. Comparing the id re-asks the question that matters.
+    //
+    // Use this after calling out to code that could have destroyed the node -
+    // see Node::update().
+    bool is_live(uint64_t id) const;
+
     // Number of nodes constructed but not yet destroyed. Non-zero after the
     // scene is torn down means something leaked.
     size_t live_count() const;

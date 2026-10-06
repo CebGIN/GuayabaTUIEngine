@@ -346,14 +346,32 @@ NodeType Node::get_type() const {
 }
 
 void Node::update(double delta_time) {
+    // Read before the callback, not after: a script that destroys its own node -
+    // take_scene() and dropping the result, or stealing a subtree and releasing
+    // it - leaves every member here dangling, instance_id_ among them. The id is
+    // a value, so it survives, and asking the registry whether it still names a
+    // live node is how the walk notices.
+    //
+    // queue_free() and free() do not need this. They defer to the end of the
+    // frame precisely so a node cannot vanish out from under its own callback.
+    const uint64_t my_id = instance_id_;
+
     if (script) script->on_process(delta_time);
+    if (!detail::NodeRegistry::instance().is_live(my_id)) return;
+
     for_each_child([delta_time](Node* child) { child->update(delta_time); });
 }
 
 void Node::draw(ConsoleRenderer& renderer) {
+    // Same guard as update(), and for the same reason: on_draw can emit, and an
+    // emitted signal can hand a reactor the means to tear this node down.
+    const uint64_t my_id = instance_id_;
+
     // The script draws here, ahead of the children, so that a child's on_draw
     // stays a true overlay instead of being buried under the parent's.
     if (script) script->on_draw(renderer);
+    if (!detail::NodeRegistry::instance().is_live(my_id)) return;
+
     for_each_child([&renderer](Node* child) { child->draw(renderer); });
 }
 
