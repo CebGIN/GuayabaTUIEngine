@@ -363,6 +363,184 @@ siga siendo un overlay de verdad por encima del padre.
   se puede formar un ciclo, y por eso `get_owner()` no necesita comprobar nada.
 - Si escribes un `Node` nuevo y sobrescribes `update` o `draw`, **termina llamando a  `Node::update(...)` / `Node::draw(...)`**. Si no, el script de ese tipo deja de dispararse sin avisar.
 
+## Señales
+
+Un script avisa a otro script sin que ninguno guarde un puntero al otro. El emisor nombra
+un evento; el oyente se conecta a ese nombre.
+
+```cpp
+class Enemigo : public Script<Node2D> {
+public:
+    void on_attached() override {
+        declare_signal<int>("danio");        // opcional: emit_signal la declara sola
+    }
+
+    void recibirGolpe(int d) { emit_signal("danio", d); }
+};
+
+class BarraDeVida : public Script<NodeUI> {
+public:
+    explicit BarraDeVida(NodeRef<Node2D> enemigo) : enemigo(std::move(enemigo)) {}
+
+    void on_attached() override {
+        enemigo->connect_script_signal("danio", this, &BarraDeVida::al_recibir_danio);
+    }
+
+    void al_recibir_danio(int d) { golpes += d; }
+
+    int golpes = 0;
+    NodeRef<Node2D> enemigo;
+};
+```
+
+La conexion se hace en `on_attached` porque ese es el hook de construccion: el subarbol
+ya esta completo y el nodo ya tiene duena.
+
+### Los reactors no cuelgan
+
+Una conexion guarda **el id del nodo al que pertenece el reactor**, que es el nodo desde
+el que conectaste. Antes de cada llamada ese id se resuelve contra el `NodeRegistry`: si ya
+no resuelve, el reactor se descarta en vez de llamarse.
+
+Eso se apoya en un invariante que ya existia: `~Node` llama a `unregister_node()` antes de
+destruir cualquier miembro, y todos los caminos de destruccion del motor pasan por ahi. Asi
+que el id empieza a fallar exactamente cuando el dueno del reactor se vuelve inalcanzable,
+que es justo cuando llamarlo seria comportamiento indefinido. No hay nada mas que registrar
+ni que indexar: lo hace la tabla de ids del arbol.
+
+Consecuencias:
+
+- Un script puede conectar sin guardar ids ni escribir desconexiones. La conexion se va
+  con su nodo.
+- Una conexion sin dueno (`connect` directo, o `connect_signal` del bus sin nodo) **no** se
+  descarta sola. Ese es el precio de no tener dueno, y se paga con
+  `disconnect_signal(id)` o `SignalBus::clear()`.
+- La limpieza es perezosa: ocurre en el siguiente `emit`, no en el instante de la muerte.
+  `is_connected(id)` sigue respondiendo `true` hasta que alguien emite.
+
+El bus tambien acepta conexiones con dueno, que es la forma de que un reactor de un script
+no sobreviva a su nodo:
+
+```cpp
+bus().connect_signal<int, Vec2>("mouse_clicked", [this](int, Vec2){ ... }, node);
+```
+
+### Firmas
+
+El almacenamiento esta borrado - un nodo guarda `void(int)` y `void()` en la misma tabla -
+pero la superficie publica no lo esta: `emit` y `connect` se plantillan sobre los tipos
+reales. Por eso un reactor puede ser una funcion o una lambda corriente con parametros
+corrientes, y un reactor cuyos parametros no encajan es un **error de compilacion**, no un
+`tipo incorrecto` en ejecucion.
+
+`signal<Args...>(nombre)` sobre un nombre declarado con otra firma lanza
+`std::logic_error` diciendo como se declaro. Los nombres de tipo salen de `typeid`, o sea
+que van mangled (`void(i)` en vez de `void(int)`).
+
+Los argumentos de `emit_signal` se degradan, asi que `emit_signal("danio", d)` encuentra la
+senal `void(int)` tanto si `d` es `int` como `unsigned` o `size_t`.
+
+### Reactores, de mas simple a mas corto
+
+```cpp
+// 1. Lambda. Los argumentos hay que escribirlos; no se pueden leer de una lambda.
+nodo->connect_signal<int>("danio", [this](int d){ vida -= d; });
+
+// 2. Lambda sin argumentos, cuando la senal no lleva carga util.
+nodo->connect_signal("murio", [this]{ mostrar_cadaver(); });
+
+// 3. Miembro de un script. Los argumentos salen de su propia firma, sin lambda y sin
+//    capturar `this`.
+nodo->connect_script_signal("danio", this, &MiScript::al_recibir_danio);
+
+// 4. Miembro de un script, sobre la senal de OTRO nodo. Lo de dentro de un script
+//    ya lo hace ScriptBase::connect_signal, sin repetir el nodo destino.
+otro_nodo->connect_script_signal("danio", this, &MiScript::al_recibir_danio);
+
+// 5. Sin dueno: hay que desconectar a mano. Para un reactor que no posee nada.
+nodo->connect_signal<int>("danio", [contador]() { ++*contador; });
+```
+
+`connect_signal` toma el reactor como referencia reenviable y construye el `std::function`
+adentro. No es un detalle: si el parametro fuera `std::function<void(Args...)>`, el
+compilador intentaria deducir los argumentos de la propia lambda y no habria forma de
+conectar una, ni siquiera escribiendo `<int>` en la llamada.
+
+### Reentrada
+
+`emit` recorre una **copia** de la lista de reactores, asi que un reactor puede conectar,
+desconectar o liberar nodos mientras se ejecuta. Las reglas son fijas, no incidentales:
+
+- Todos los reactores conectados cuando empezo el `emit` se ejecutan, aunque uno anterior
+  los haya desconectado. No hay bandera de "cancelado", igual que en Godot.
+- Un reactor conectado **durante** un `emit` no se ejecuta en ese `emit`.
+- Un reactor `once` se borra **antes** de llamarse, asi que uno que lanza no queda armado.
+
+Coste: un `std::function` por conexion y una copia de la lista por `emit`. Para un evento
+que se dispara unas pocas veces por frame es el intercambio correcto; para una diffusion
+por frame en un camino caliente, midelo.
+
+### El bus global
+
+Para lo que no pertenece a un nodo: la entrada, un cambio de escena, un estado de juego al
+que cualquier parte de la escena pueda escuchar.
+
+```cpp
+SignalBus::get_instance().emit_signal("mouse_clicked", 1, Input::mouse_pos);
+```
+
+No es un sustituto de las senales de nodo. Si una senal tiene un duena claro, ese duena es un
+nodo y la senal es suya, alcanzable por ruta. El bus es para lo que es ambiental de verdad, o
+para cuando el emisor no sabe quien escucha.
+
+Una unica instancia filtrada a proposito, igual que el `NodeRegistry`. El motor **no** la
+limpia por ti al cambiar de escena: una conexion hecha para la escena siguiente puede ya
+estar ahi. Llama a `clear()` donde signifique algo.
+
+### Señales que ya emite el motor
+
+`NodeButton` declara `clicked` en su constructor y lo dispara en `handle_click()`, antes de
+llamar al `on_click` de siempre. Las dos vias conviven y ninguna sustituye a la otra:
+
+```cpp
+// Con handle: lo que ya habia.
+salir->set_on_click([]{ SceneManager::get_instance().stop_running(); });
+
+// Con señal: permite conectarse sin guardar un handle al boton.
+salir->connect_script_signal("clicked", this, &MiScript::salir);
+```
+
+Y en el bus, desde `Input::refresh_input()`, que el bucle ya llama **antes** de
+`process_scene()`, asi que un reactor ve el evento en el mismo frame:
+
+| Señal | Carga | Cuando |
+|---|---|---|
+| `mouse_clicked` | `(int boton, Vec2 posicion)` | 1 = izquierdo, 2 = derecho, en el frame del clic |
+| `mouse_moved` | `(Vec2 posicion)` | solo cuando el puntero se ha movido de verdad |
+
+El boton es un `int` y no un enum a proposito, para que un reactor pueda compararlo sin
+incluir esta cabecera.
+
+**No hay `key_pressed` porque el motor no tiene entrada de teclado.** `IOSTerminal` expone
+`poll_events`, el raton y lecturas de texto bloqueantes, y nada mas. Anadirla significa
+meter un poll de teclas en `IOSTerminal` y en los dos backends primero; en ese momento
+`key_pressed` encaja aqui al lado de las otras dos.
+
+### Consultas y limpieza
+
+```cpp
+nodo->has_signal<int>("danio");     // false si no existe o si es de otra firma
+nodo->get_signal_count();           // cuantas senales declara este nodo
+nodo->is_connected(id);             // sigue vivo ese id de conexion
+nodo->disconnect_signal(id);        // false si nadie lo tenia
+nodo->clear_signals();              // suelta todos los reactores de este nodo
+```
+
+`has_signal` no es decorativo: es lo que hace que un emisor builtin cueste una busqueda en
+un mapa en vez de una declaracion y una lista vacia de reactores. `clear_signals()` no lo
+llama nadie del motor; existe para el caso de un teardown de escena, donde quieres soltarlos
+antes de que nada mas empiece a emitir en la escena siguiente.
+
 ## Integracion CMake
 
 El motor es una libreria estatica que no depende de nada externo. Tres modos de consumo:
@@ -398,13 +576,14 @@ El requisito de C++17 se propaga automaticamente: no hace falta `set(CMAKE_CXX_S
 include/guayaba/     API publica. Ninguna cabecera de plataforma es alcanzable desde aqui.
   Guayaba.hpp        Header umbrella
   Core/              Vec2, TermChar, Color, Input, NodeType, Script,
-                     ScriptRef, NodeRef, NodeRegistry
+                     ScriptRef, Signal, SignalBus, NodeRef, NodeRegistry
   Terminal/          IOSTerminal (interfaz abstracta) + create_system_terminal()
   Renderer/          ConsoleRenderer
   Nodes/             Node, Node2D, NodeUI, NodeSQ, NodeBox, NodeButton
   Scene/             SceneManager
 src/                 Implementaciones. Privado, no se instala.
-  Core/              NodeRegistry, DeletionQueue (cola de destruccion diferida)
+  Core/              NodeRegistry, Signal, SignalBus,
+                     DeletionQueue (cola de destruccion diferida)
   Terminal/          Backends Linux/macOS (termios) y Windows (Win32)
 examples/consumer/   Demo interactiva con backend simulado
 ```

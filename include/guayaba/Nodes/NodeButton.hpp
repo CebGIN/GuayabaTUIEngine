@@ -29,8 +29,12 @@ public:
 
     void update_hover(const Vec2 mouse_global_pos);
 
+    // Emits the "clicked" signal declared in the constructor, then calls on_click.
     void handle_click();
 
+    // The one-callback-per-button route. Both it and the "clicked" signal fire, and
+    // neither replaces the other: a signal lets something connect without holding a
+    // handle to this button, which a callback cannot do.
     void set_on_click(std::function<void()> callback);
 
     void draw(ConsoleRenderer& renderer) override;

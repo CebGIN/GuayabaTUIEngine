@@ -1,12 +1,14 @@
 #ifndef GUAYABA_CORE_SCRIPT_HPP
 #define GUAYABA_CORE_SCRIPT_HPP
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
 
+#include <guayaba/Core/SignalBus.hpp>
 #include <guayaba/Nodes/Node.hpp>
 
 namespace guayaba {
@@ -69,6 +71,22 @@ class ConsoleRenderer;
         binding only happens while building, on_attached is a build-time hook,
         not something the running tree triggers.
 
+    SIGNALS
+    Those hooks are the script's own: the engine knows to call them. A signal is
+    the other direction - the script says who else may call into it, by name,
+    with neither side holding a handle to the other:
+
+        void on_attached() override {
+            connect_script_signal("danio", this, &Blinker::on_danio);
+            bus().connect_script_signal("mouse_clicked", this, &Blinker::on_click);
+        }
+        void on_danio(int d) { vida -= d; }
+
+    Both forms take the owner from the script, so the connection is dropped when
+    this node is destroyed and there is nothing to disconnect by hand. The
+    forwarders below are these calls with node-> already filled in. See
+    Core/Signal.hpp.
+
     A script attached while the node is already live never sees on_enter_tree,
     because a live node cannot be given a new script. Ask for it yourself:
 
@@ -130,7 +148,82 @@ protected:
     // base version and leave Script<N>'s typed handle unbuilt.
     virtual void bind_to(Node* host) { owner = host; }
 
+    // --- Signals ------------------------------------------------------------
+    //
+    // Every one of these is this script's own node with node-> filled in, so a
+    // callback does not have to spell it out. They are protected because a signal
+    // is only meaningful once the script is bound: see owner_nonnull() below.
+
+    // The bus, for the signals no single node owns.
+    SignalBus& bus() const { return SignalBus::get_instance(); }
+
+    // This script's node, as a Signal, so a script can declare or inspect its own
+    // event without casting out to Node. Same name as Node's, same signature.
+    template<typename... Args>
+    Signal<Args...>& declare_signal(const std::string& signal_name) {
+        return owner_nonnull()->template declare_signal<Args...>(signal_name);
+    }
+
+    // Emits on this script's own node.
+    template<typename... Args>
+    void emit_signal(const std::string& signal_name, Args&&... args) {
+        owner_nonnull()->template emit_signal<Args...>(signal_name, std::forward<Args>(args)...);
+    }
+
+    // A reactor for a signal on SOME OTHER node, owned by this script. Throws if
+    // that node has no such signal, which is a query you can make yourself with
+    // has_signal() when the emitter may not exist yet.
+    //
+    //     node->get_node<NodeButton>("salir")->connect_signal<int>("clicked",
+    //         [this](int){ ... });
+    //
+    // The reactor dies with this script's node, not with the node that emits, which
+    // is the right way round: the listener is the one that goes away.
+    template<typename... Args, typename F>
+    uint64_t connect_signal(const std::string& signal_name, F&& reactor, bool once = false) {
+        Node* target = owner_nonnull();
+        return target->template signal<Args...>(signal_name).connect(
+            detail::make_reactor<Args...>(std::forward<F>(reactor)), owner->instance_id(), once);
+    }
+
+    // The same, with the arguments taken from a method's own signature instead of
+    // spelled out:
+    //
+    //     node->get_node<NodeButton>("salir")->connect_script_signal(
+    //         "clicked", this, &MyScript::al_hacer_clic);
+    //
+    // Where a Script<N> is available, connect_script_signal on the node needs no
+    // target at all and reads better; this exists for a target reached through a
+    // NodeRef<Button> where the static type is a plain Node.
+    template<typename R, typename C, typename... Args>
+    uint64_t connect_script_signal(const std::string& signal_name,
+                                   Node* target,
+                                   C* reactor,
+                                   R (C::*member)(Args...),
+                                   bool once = false) {
+        if (target == nullptr) {
+            throw std::invalid_argument("ScriptBase::connect_script_signal: null target node.");
+        }
+        return target->template signal<std::decay_t<Args>...>(signal_name).connect(
+            [reactor, member](std::decay_t<Args>... args) {
+                (reactor->*member)(std::forward<decltype(args)>(args)...);
+            },
+            owner->instance_id(), once);
+    }
+
 private:
+    // The one thing every signal call above assumes. Throws rather than
+    // dereferencing, because the only way to reach it unbound is to call it before
+    // Node has bound the script - which is a caller mistake, not a state to
+    // tolerate.
+    Node* owner_nonnull() const {
+        if (owner == nullptr) {
+            throw std::logic_error("ScriptBase: no signal call is valid before the script is bound"
+                " to a node. Wire signals from on_attached or a later hook.");
+        }
+        return owner;
+    }
+
     // Not a weak_ptr: the node owns this script, so a cycle is impossible. It
     // does not need invalidating either, because a script is destroyed only by
     // its own node's destructor - see the ownership note above.

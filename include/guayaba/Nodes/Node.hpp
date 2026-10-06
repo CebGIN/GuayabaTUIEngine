@@ -12,6 +12,7 @@
 
 #include <guayaba/Core/NodeRegistry.hpp>
 #include <guayaba/Core/NodeType.hpp>
+#include <guayaba/Core/Signal.hpp>
 
 namespace guayaba {
 
@@ -61,6 +62,16 @@ struct has_node_type<T, std::void_t<typename T::node_type>> : std::true_type {};
     safe: child_index() for position, get_path()/is_ancestor_of() for
     relationship, and NodeRef for identity across a free.
 
+    SIGNALS
+    A node also carries its own events, so two parts of a tree can talk without
+    either holding a handle to the other:
+
+        player->emit_signal("danio", 7);
+
+    A reactor connected from a node is dropped when that node is destroyed, which
+    is what makes it safe to connect from a Script without bookkeeping. See
+    Core/Signal.hpp for what that rests on.
+
     Non-copyable: a copy would duplicate the instance id, leaving one slot
     pointing at two nodes, and the first destructor to run would invalidate the
     survivor's handles.
@@ -87,6 +98,12 @@ protected:
     // ScriptRef re-derive the script from the node's id without holding a
     // pointer that could dangle. See Core/ScriptRef.hpp.
     bool script_sealed = false;
+
+    // This node's own events, by name. Heterogeneous by necessity - "danio" is
+    // void(int) and "murio" is void() and both belong to the same node - so the
+    // table erases the arguments and the member templates below restore them.
+    // See Core/Signal.hpp.
+    SignalTable signals;
 
     virtual void enter_tree();
     virtual void exit_tree();
@@ -123,6 +140,20 @@ private:
     void reindex_from(size_t start);
 
     Node* resolve_path(const std::string& path) const;
+
+    // Two different mistakes, two different messages: the name was never declared
+    // on this node, or it is declared with other arguments and asking for it as
+    // Args... would produce a second signal under the same name.
+    template<typename... Args>
+    std::logic_error signal_shape_error(const std::string& signal_name) const {
+        const char* existing = signals.signature_of(signal_name);
+        if (existing != nullptr) {
+            return std::logic_error("Node::signal: '" + name + "' declares \"" + signal_name
+                + "\" as " + existing + ", not the requested signature.");
+        }
+        return std::logic_error("Node::signal: '" + name + "' declares no signal named \""
+            + signal_name + "\". connect_signal and emit_signal declare one on demand.");
+    }
 
 public:
     explicit Node(std::string node_name = "Unnamed Node");
@@ -306,6 +337,106 @@ public:
     // That does rule out asking about a plain ScriptBase.
     template<typename S>
     ScriptRef<typename S::node_type, S> get_script_as() const;
+
+    // --- Signals ------------------------------------------------------------
+    //
+    // A node's own events. emit_signal calls every reactor connected to that name
+    // on this node, in the order they were connected:
+    //
+    //     player->emit_signal("danio", 7);
+    //     barra->connect_signal<int>("danio", [barra_weak](int d){ refresh(d); });
+    //
+    // Nothing here needs a handle to the other node if you wire it from the same
+    // builder function, because connect_signal's owner is the node doing the
+    // connecting, not the node that will later emit.
+    //
+    // A reactor connected here is dropped automatically when THIS node is
+    // destroyed, so a script may connect freely without recording ids or
+    // disconnecting on the way out. See Core/Signal.hpp for why that holds.
+
+    // Declares this node's signal, typed by Args. Optional: connect_signal and
+    // emit_signal both declare on demand, and re-declaring the same shape hands
+    // back the same signal. Declaring it yourself is what makes the signature
+    // discoverable before anything is emitted, which is why NodeButton declares
+    // its own "clicked".
+    template<typename... Args>
+    Signal<Args...>& declare_signal(const std::string& signal_name) {
+        return signals.declare<Args...>(signal_name, "Node '" + name + "'");
+    }
+
+    // The signal itself, for counting reactors or disconnecting by id. Throws if
+    // the name is not declared with this signature, because "that one exists but
+    // takes different arguments" is a programming error and not a query result.
+    template<typename... Args>
+    Signal<Args...>& signal(const std::string& signal_name) const {
+        Signal<Args...>* found = signals.find<Args...>(signal_name);
+        if (found == nullptr) throw signal_shape_error<Args...>(signal_name);
+        return *found;
+    }
+
+    // A query, so a mismatch and an absent signal are both false rather than a
+    // throw. This is what an emitter checks to avoid declaring a signal nobody
+    // listens to.
+    template<typename... Args>
+    bool has_signal(const std::string& signal_name) const {
+        return signals.find<Args...>(signal_name) != nullptr;
+    }
+
+    // Declares on demand, then adds a reactor. Returns the id that disconnects
+    // it, which most callers never need to keep: the connection dies with this
+    // node either way. once drops the reactor after its first call.
+    //
+    // The arguments have to be spelled here - connect_signal<int>("danio", ...) -
+    // because they cannot be read off a lambda. Inside a Script, prefer
+    // connect_script_signal below or ScriptBase::connect_signal, which take them
+    // from a method's own signature instead.
+    template<typename... Args, typename F>
+    uint64_t connect_signal(const std::string& signal_name, F&& reactor, bool once = false) {
+        return declare_signal<Args...>(signal_name).connect(
+            detail::make_reactor<Args...>(std::forward<F>(reactor)), instance_id_, once);
+    }
+
+    // The form to use from inside a Script when the reactor is a method of that
+    // script: the arguments come from the method's own signature, so nothing is
+    // spelled twice, and there is no lambda capturing `this` to get wrong.
+    //
+    //     connect_signal("danio", this, &MyScript::recibir_danio);
+    //     void MyScript::recibir_danio(int d) { vida -= d; }
+    template<typename R, typename C, typename... Args>
+    uint64_t connect_script_signal(const std::string& signal_name,
+                                   C* reactor,
+                                   R (C::*member)(Args...),
+                                   bool once = false) {
+        return declare_signal<std::decay_t<Args>...>(signal_name).connect(
+            [reactor, member](std::decay_t<Args>... args) {
+                (reactor->*member)(std::forward<decltype(args)>(args)...);
+            },
+            instance_id_, once);
+    }
+
+    // Calls every reactor currently connected to that name. Args are deduced and
+    // decayed, so emit_signal("danio", d) finds the void(int) signal whether d is
+    // an int, an unsigned or a size_t copy of one. The arguments are forwarded to
+    // the reactors unchanged; the reactor list itself is snapshotted, so a reactor
+    // may connect, disconnect or free nodes while this runs.
+    template<typename... Args>
+    void emit_signal(const std::string& signal_name, Args&&... args) {
+        declare_signal<std::decay_t<Args>...>(signal_name).emit(std::forward<Args>(args)...);
+    }
+
+    // A connection id is what connect_signal returned. False when it is not live
+    // any more, which includes the case where its owner node has been destroyed.
+    bool is_connected(uint64_t connection_id) const { return signals.is_connected(connection_id); }
+
+    bool disconnect_signal(uint64_t connection_id) { return signals.disconnect(connection_id); }
+
+    size_t get_signal_count() const { return signals.size(); }
+
+    // Drops every connection on this node's signals. Nothing in the engine calls
+    // it: the connections die with the node, and a live node keeps the ones it was
+    // given. It exists for the scene teardown case, where you want them gone
+    // before anything else starts emitting into the next scene.
+    void clear_signals() { signals.clear(); }
 
     virtual void draw(ConsoleRenderer& renderer);
 

@@ -4,7 +4,13 @@
 namespace guayaba {
 
 NodeButton::NodeButton(const std::string& node_name, Vec2 node_position, std::string text_color_name, std::string background_color_name, std::vector<std::string> node_text) :
-    NodeUI(node_name, node_position, text_color_name, background_color_name, node_text) {}
+    NodeUI(node_name, node_position, text_color_name, background_color_name, node_text) {
+    // Pre-declared, so that has_signal("clicked") is a real answer from the start
+    // and handle_click() costs a map lookup rather than an allocation on a button
+    // nobody is listening to. Declared void() because a click carries nothing this
+    // button can know: the reactor can read Input::mouse_pos if it needs where.
+    declare_signal("clicked");
+}
 
 void NodeButton::update(double delta_time) {
     update_hover(Input::mouse_pos);
@@ -24,7 +30,16 @@ void NodeButton::update_hover(const Vec2 mouse_global_pos) {
     hovered = is_inside(mouse_global_pos);
 }
 
-void NodeButton::handle_click() { if (Input::l_click_just_pressed && hovered && on_click) on_click(); }
+void NodeButton::handle_click() {
+    if (!(Input::l_click_just_pressed && hovered)) return;
+
+    // The signal is the decoupled route: a reactor elsewhere connects to it without
+    // anyone having to keep a handle to this button. on_click below is the older,
+    // equally valid one-callback-per-button route, and both fire.
+    emit_signal("clicked");
+
+    if (on_click) on_click();
+}
 
 void NodeButton::set_on_click(std::function<void()> callback) {
     on_click = callback;
