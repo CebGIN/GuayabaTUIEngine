@@ -33,7 +33,16 @@ else()
     message(FATAL_ERROR "GUAYABA_CONSUMER_MODE desconocido: ${GUAYABA_CONSUMER_MODE}")
 endif()
 
-# Demo interactiva: arranca el bucle de eventos real.
-add_executable(consumer main.cpp)
+# Demo interactiva: escenas con pestanas, maneja el raton de verdad.
+# scenes/nav.cpp es la implementacion de los helpers que comparten las escenas.
+add_executable(consumer main.cpp scenes/nav.cpp)
 target_link_libraries(consumer PRIVATE GuayabaTUIEngine::GuayabaTUIEngine)
 
+# El motor esta en movimiento y la API cambia con el, asi que no hay suite de
+# tests: la demo de scenes/ es la forma de comprobar el comportamiento, y se
+# ejecuta de verdad, con el raton, en una terminal.
+if(MSVC)
+    target_compile_options(consumer PRIVATE /W4)
+else()
+    target_compile_options(consumer PRIVATE -Wall -Wextra -pedantic)
+endif()
