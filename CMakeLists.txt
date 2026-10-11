@@ -98,3 +98,15 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/GuayabaTUIEngineConfigVersion.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/GuayabaTUIEngine
 )
+
+# --- Tests ---------------------------------------------------------------------
+# Off by default so a project that consumes the engine through
+# add_subdirectory() inherits no extra targets. Enabled on the top level with
+# -DGUAYABA_BUILD_TESTS=ON, the tests lay out scenes in memory without a
+# terminal - see tests/layout_alignment.cpp.
+option(GUAYABA_BUILD_TESTS "Build GuayabaTUIEngine's headless layout tests" OFF)
+
+if(GUAYABA_BUILD_TESTS)
+    add_executable(layout_alignment tests/layout_alignment.cpp)
+    target_link_libraries(layout_alignment PRIVATE GuayabaTUIEngine)
+endif()
