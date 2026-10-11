@@ -37,6 +37,7 @@
 #include <guayaba/Nodes/UI/HBox.hpp>
 #include <guayaba/Nodes/UI/Label.hpp>
 #include <guayaba/Nodes/UI/PanelContainer.hpp>
+#include <guayaba/Nodes/UI/ScrollView.hpp>
 #include <guayaba/Nodes/UI/VBox.hpp>
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
 #include <guayaba/Scene/SceneManager.hpp>
