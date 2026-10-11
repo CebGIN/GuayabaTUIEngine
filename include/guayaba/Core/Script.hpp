@@ -13,8 +13,6 @@
 
 namespace guayaba {
 
-class ConsoleRenderer;
-
 /*
     Behaviour that attaches to an existing Node without deriving from that
     node's C++ class. The idea is Godot's Script: bolt logic and your own state
@@ -123,10 +121,6 @@ public:
 
     // Every frame, for as long as the node is in the tree.
     virtual void on_process(double delta_time) { (void)delta_time; }
-
-    // After the node's own drawing and BEFORE its children, so that a child's
-    // on_draw stays a genuine overlay on top of the parent's.
-    virtual void on_draw(ConsoleRenderer& renderer) { (void)renderer; }
 
     const std::string& get_script_name() const { return script_name; }
     void set_script_name(std::string name) { script_name = std::move(name); }
@@ -251,7 +245,7 @@ private:
 /*
     A script that knows what kind of node it belongs to.
 
-    N is the concrete node type: Script<Node2D>, Script<NodeButton>, or plain
+    N is the concrete node type: Script<Node2D>, Script<Button>, or plain
     Script for a node you do not care to narrow. Inside a callback, node is a
     ready-to-use N*, so reaching a property needs no cast and no call to
     get_owner_as<T>().

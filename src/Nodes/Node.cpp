@@ -350,19 +350,7 @@ size_t Node::live_node_count() {
     return detail::NodeRegistry::instance().live_count();
 }
 
-NodeType Node::get_type() const {
-    return NodeType::NODE;
-}
-
 void Node::update(double delta_time) {
-    // Read before the callback, not after: a script that destroys its own node -
-    // take_scene() and dropping the result, or stealing a subtree and releasing
-    // it - leaves every member here dangling, instance_id_ among them. The id is
-    // a value, so it survives, and asking the registry whether it still names a
-    // live node is how the walk notices.
-    //
-    // queue_free() and free() do not need this. They defer to the end of the
-    // frame precisely so a node cannot vanish out from under its own callback.
     const uint64_t my_id = instance_id_;
 
     if (script) script->on_process(delta_time);
@@ -371,17 +359,19 @@ void Node::update(double delta_time) {
     for_each_child([delta_time](Node* child) { child->update(delta_time); });
 }
 
-void Node::draw(ConsoleRenderer& renderer) {
-    // Same guard as update(), and for the same reason: on_draw can emit, and an
-    // emitted signal can hand a reactor the means to tear this node down.
-    const uint64_t my_id = instance_id_;
+void Node::update_layout(const Rect& parent_rect) {
+    // Hands the rect straight to every child. A Control resolves itself first
+    // and then calls back in with its own rect, so children always measure
+    // against the nearest enclosing Control rather than against a rect the
+    // plain nodes in between never computed.
+    for_each_child([&parent_rect](Node* child) { child->update_layout(parent_rect); });
+}
 
-    // The script draws here, ahead of the children, so that a child's on_draw
-    // stays a true overlay instead of being buried under the parent's.
-    if (script) script->on_draw(renderer);
-    if (!detail::NodeRegistry::instance().is_live(my_id)) return;
-
-    for_each_child([&renderer](Node* child) { child->draw(renderer); });
+void Node::draw(ConsoleRenderer& renderer, const Rect& clip) {
+    // Traversal is only the children: a script has no drawing hook, so nothing
+    // here calls user code that could free this node mid-frame. for_each_child
+    // is already safe against a child removing a sibling as it draws.
+    for_each_child([&renderer, &clip](Node* child) { child->draw(renderer, clip); });
 }
 
 void Node::attach_script(std::unique_ptr<ScriptBase> new_script) {
@@ -403,8 +393,7 @@ void Node::attach_script(std::unique_ptr<ScriptBase> new_script) {
     script_sealed = true;
 
     // Unconditional now: binding only happens while building, which is exactly
-    // when this is worth saying. It used to be gated on is_in_tree(), which made
-    // it fire only for the runtime attach that no longer exists.
+    // when this is worth saying.
     script->on_attached();
 }
 

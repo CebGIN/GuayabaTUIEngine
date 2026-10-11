@@ -3,8 +3,8 @@
 
 namespace guayaba {
 
-Node2D::Node2D(const std::string& node_name, Vec2 node_position)
-    : Node(node_name), position(node_position){}
+Node2D::Node2D(const std::string& node_name)
+    : Node(node_name) {}
 
 void Node2D::invalidate_cache_recursively() {
     if (!this->is_cached_position_valid) return;
@@ -20,10 +20,6 @@ void Node2D::set_local_position(Vec2 new_position){
     if(new_position == position) return;
     position = new_position;
     invalidate_cache_recursively();
-}
-
-NodeType Node2D::get_type() const {
-    return NodeType::NODE2D;
 }
 
 Vec2 Node2D::get_global_position() const {
