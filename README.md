@@ -665,6 +665,7 @@ Los cuatro:
 | `HBox` | Una celda por hijo, en fila; anchos se suman, la mas alta manda |
 | `VBox` | Una celda por hijo, en columna; alturas se suman, la mas ancha manda |
 | `PanelContainer` | Estira el hijo dentro del marco y dibuja ese marco con un `StyleBox` |
+| `ScrollView` | Un `PanelContainer` cuyo contenido se desplaza arrastrando un tirador |
 
 `HBox` y `VBox` reparten una celda por hijo a lo largo de su eje: la celda es exactamente el
 minimo del hijo, y la separacion va entre celdas, nunca antes de la primera ni despues de la
@@ -727,6 +728,108 @@ sobre el tamano real, esto solo impide que se quede corto. Un `Label` con `fit_c
 `FullRect` sigue ocupando toda la pantalla; la propiedad le dice a los contenedores cuanto
 reservar, no le quita sitio a quien se lo da.
 
+## ScrollView: contenido mas alto que la vista
+
+`ScrollView` es un `PanelContainer` cuyo contenido se desplaza arrastrando un tirador.
+
+```text
++---------------------------+--+-+
+| | primera linea           | |#| |
+| | segunda linea           | |#| |
+| | tercera linea           |#| | |
+| | cuarta linea            |#| | |   <- tirador, arrastrable
++---------------------------+--+-+
+```
+
+```cpp
+NodeRef<ScrollView> vista = root->add_child<ScrollView>("vista", Vec2{0, 0});
+vista->set_size({30, 8});
+vista->get_stylebox().set_border_style(StyleBorder::ROUNDED);
+vista->get_stylebox().set_content_margin(1, 1, 1, 1);
+
+NodeRef<VBox> lista = vista->add_child<VBox>("lista", Vec2{0, 0});
+lista->set_anchor_preset(AnchorPreset::FullRect);   // el hijo tiene que rellenar
+
+for (int i = 0; i < 40; ++i) {
+    NodeRef<Label> linea = lista->add_child<Label>("linea" + std::to_string(i));
+    linea->set_text({"linea " + std::to_string(i)});
+    linea->set_fit_content(true);                   // sin esto no reserva alto
+}
+```
+
+Tres cosas que separan este nodo de un `PanelContainer`, y las tres importan:
+
+**El minimo ignora el contenido.** `PanelContainer::get_minimum_size()` suma lo que el hijo
+necesita, porque un panel se dimensiona por lo que tiene dentro. Un `ScrollView` hace justo lo
+contrario, y es deliberado: una vista dimensionada por su contenido nunca puede ser mas
+pequena que el, asi que nunca tendria nada que desplazar, y creceria en vez de desplazarse.
+Aqui el minimo es solo el marco mas la columna del tirador. Lo que decide el alto es su
+`set_size()`, sus anchors o lo que le imponga el padre, y el contenido se sale a proposito.
+
+**El tirador va fuera del marco.** La columna queda a la derecha del rect del panel, no dentro,
+y `get_minimum_size()` la reserva como el `PanelContainer` reserva el borde: sumada al marco,
+no centrada dentro del contenido. Asi la barra no le roba ancho al texto.
+
+**El hijo tiene que rellenar, y el contenido tiene que medir.** Como en cualquier
+`PanelContainer`, el hijo solo ocupa el rect de contenido si se le dice (`Grow::Both` o el preset
+`FullRect`). Y solo los `Control` aportan al minimo, asi que un `ScrollView` lleno de `Label` sin
+`fit_content` no tiene nada que desplazar por mucho texto que contengan.
+
+La barra aparece solo cuando el contenido es mas alto que la vista. El hueco se reserva igual en
+todos los casos - el minimo no puede preguntar al contenido cuanto mide sin medirlo, y esa
+medida solo esta disponible despues del layout - pero cuando no hay nada que desplazar la
+columna se queda en blanco en vez de enseñar un tirador que no lleva a ningun sitio.
+
+### Como se desplaza
+
+Se arrastra. El tirador se sujeta al pulsar, remembering donde estaba el puntero dentro de el,
+para que el contenido bajo el cursor no se mueva al empezar el arrastre. Mientras el boton siga
+pulsado, la distancia del puntero al borde superior de la barra se reparte sobre la extension
+del contenido. Al soltar, el arrastre termina este donde este el puntero: el offset lo acota el
+layout, asi que un arrastre soltado mas alla del final descansa en el final.
+
+El tirador solo se sujeta al pulsar, nunca por pasar el raton por encima, y un arrastre que
+empieza en el tirador no se lo puede robar otra vista que este detras.
+
+El hit-testing usa los rects resueltos en el frame anterior, que son los que ademas dibuja este
+frame, exactamente el mismo trato que hace `Button::update()`: el layout corre entre `update()` y
+`draw()`, asi que comprobar el rect mas fresco seria actuar sobre un tamano que el usuario aun
+no ha visto.
+
+### La API
+
+```cpp
+vista->set_scroll_offset({0, 10});   // absoluto, acotado al rango real
+vista->scroll_by({0, 3});            // relativo
+vista->scroll_to_top();
+vista->scroll_to_bottom();
+vista->get_scroll_offset();          // devuelve Vector2
+```
+
+El offset se acota en cada paso de layout, no solo cuando se llama a `set_scroll_offset()`,
+porque el contenido puede crecer con el offset quieto: un `Label` con mas lineas, o un hijo nuevo
+en el `VBox`, convierten en final un offset donde antes no lo era. Por eso `scroll_by({0, 5000})`
+acota igual que `set_scroll_offset()`.
+
+El desplazamiento horizontal no se ofrece: una barra horizontal necesita un segundo tirador y
+un segundo rango, y nada en el arbol se envuelve de una forma que lo quisiera. La `x` se guarda
+tal cual sin acotar, para que quien la escriba no tenga que acordarse de que mitad esta viva.
+
+### Por que un tirador y no una rueda
+
+El motor no tiene entrada de rueda: `IOSTerminal` expone la posicion del raton y los dos botones
+y nada mas. Asi que en vez de fingir una rueda, esto expone un tirador arrastrable normal, que
+el terminal puede responder con la entrada de clic que ya tiene.
+
+La rueda sigue siendo la entrada mejor para una lista, y sigue faltando. Cuando llegue, desplazarse
+sera un segundo camino hacia el mismo `set_scroll_offset()` que el arrastre ya usa: sumar
+`scroll_up`/`scroll_down` al `Input` y restarlos aqui.
+
+Los eventos de rueda ya llegan hoy desde el terminal y se descartan solos: en
+`LinuxTerminal.cpp`, `is_motion` se calcula como `button & 32`, y los codigos 64/65 de la rueda
+traen ese bit puesto, asi que caen fuera del `if (!is_motion)` y no hacen nada. Cuando se
+anada el soporte hay que quitar ese bit antes de mirar los botones.
+
 ## Integracion CMake
 
 El motor es una libreria estatica que no depende de nada externo. Tres modos de consumo:
@@ -767,7 +870,7 @@ include/guayaba/     API publica. Ninguna cabecera de plataforma es alcanzable d
   Renderer/          ConsoleRenderer
   Nodes/             Node, Node2D, NodeTextMatrix
     UI/              Control, Label, Button, Container,
-                     HBox, VBox, PanelContainer
+                     HBox, VBox, PanelContainer, ScrollView
   Scene/             SceneManager
 src/                 Implementaciones. Privado, no se instala.
   Core/              NodeRegistry, Signal, SignalBus,
