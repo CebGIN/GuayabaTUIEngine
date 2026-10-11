@@ -1,4 +1,5 @@
 #include <guayaba/Core/Input.hpp>
+#include <guayaba/Core/Rect.hpp>
 #include <guayaba/Nodes/Node.hpp>
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
 #include <guayaba/Scene/SceneManager.hpp>
@@ -86,7 +87,14 @@ void SceneManager::start_running() {
             Input::refresh_input();
 
             this->process_scene();
-            this->root_node->draw(renderer);
+
+            // Layout before draw, and after the resize above so Controls
+            // measure against the buffer size actually about to be painted.
+            this->root_node->update_layout(Rect::from_size(renderer.get_buffer_size()));
+
+            // The clip starts as the whole buffer, and narrows from there as
+            // it passes down through any Control that clips.
+            this->root_node->draw(renderer, Rect::from_size(renderer.get_buffer_size()));
 
             // Last, so that anything freed earlier in the frame is already gone
             // before the next one starts, and so a node queued by on_process still
