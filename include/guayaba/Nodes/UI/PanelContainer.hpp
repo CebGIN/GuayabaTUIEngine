@@ -43,6 +43,11 @@ namespace guayaba {
     set to Grow::Both or the FullRect preset spans the panel exactly.
 */
 class PanelContainer : public Container {
+protected:
+    // Protected rather than private so a subclass can build on the panel instead
+    // of re-deriving it: ScrollView is a PanelContainer whose child is offset
+    // and whose track sits outside this same frame, and both need the content
+    // rect and the box the panel already resolved.
     StyleBox stylebox;
 
     // The area inside the border and the margins - what the child gets, and what
