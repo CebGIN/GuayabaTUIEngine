@@ -11,9 +11,13 @@ using namespace guayaba;
 std::unique_ptr<Node> crearEscena() {
     auto root = std::make_unique<Node>("root");
 
-    NodeBox* box = root->add_child<NodeBox>("box", Vec2{0, 0}, Vec2{20, 6}, Color::BLUE);
-    box->add_child<NodeUI>("label", Vec2{2, 2}, Color::BLACK, Color::WHITE,
-                          std::vector<std::string>{"Hola"});
+    NodeRef<Control> box = root->add_child<Control>("box", Vec2{0, 0});
+    box->set_anchor_preset(AnchorPreset::FullRect);
+    box->set_clip_children(true);
+
+    auto label = box->add_child<NodeTextMatrix>("label");
+    label->set_text({"Hola"});
+    label->set_local_position({2, 2});
 
     return root;
 }
@@ -45,7 +49,7 @@ escribir. La regla es una sola:
 
 ```cpp
 auto root = std::make_unique<Node>("root");       // tu lo duenes
-NodeRef<NodeUI> titulo = root->add_child<NodeUI>(...); // el arbol ya lo duene
+NodeRef<NodeTextMatrix> titulo = root->add_child<NodeTextMatrix>(...); // el arbol ya lo duene
 SceneManager::get_instance().change_scene(std::move(root));
 ```
 
@@ -132,10 +136,10 @@ Las rutas se resuelven contra el arbol, no se guardan, asi que sobreviven a move
 un nodo de sitio:
 
 ```cpp
-root->get_node<NodeUI>("fondo/titulo");       // relativa
-root->get_node<NodeUI>("/fondo/titulo");      // absoluta, incluye la raiz
-root->get_node_or_null<NodeUI>("quizas");     // vacio si no existe
-node->get_node<NodeUI>("../label");           // "." y ".." tambien
+root->get_node<NodeTextMatrix>("fondo/titulo");       // relativa
+root->get_node<NodeTextMatrix>("/fondo/titulo");      // absoluta, incluye la raiz
+root->get_node_or_null<NodeTextMatrix>("quizas");     // vacio si no existe
+node->get_node<NodeTextMatrix>("../label");           // "." y ".." tambien
 ```
 
 `get_node()` lanza excepcion si no encuentra el nodo; `get_node_or_null()` devuelve
@@ -184,7 +188,7 @@ destruye, sin importar quantas veces se reutilice esa direccion. No detectan una
 referencia que sigue siendo valida pero quedo obsoleta (por ejemplo, tras mover el
 nodo a otro sitio): para eso esta `get_node_or_null()`.
 
-Solo ensanchan: un `NodeRef<NodeUI>` se convierte implicitamente en
+Solo ensanchan: un `NodeRef<NodeTextMatrix>` se convierte implicitamente en
 `NodeRef<Node>`, nunca al reves. Estrechar es una pregunta que hay que hacer con
 `get()` o con `get_node<T>()`, que ademas comprueban.
 
@@ -319,7 +323,6 @@ ref.script();               // nullptr: el nodo se destruyo
 | `on_detached` | desde el destructor del nodo dueno, la ultima cosa que ve tu script |
 | `on_enter_tree` / `on_exit_tree` | solo si el nodo entra o sale del arbol de escena |
 | `on_process(dt)` | cada frame, con el nodo en el arbol |
-| `on_draw(renderer)` | tras el dibujado del nodo y **antes** que el de sus hijos |
 
 Los dos pares son ciclos distintos y no se mezclan. Como el hueco esta sellado, ligar
 solo ocurre al montar el arbol, asi que `on_attached` es un hook de construccion, no
@@ -336,8 +339,10 @@ void on_attached() override {
 `children` y `parent` siguen en pie y tu `node` se lee como un nodo coherente. No
 liberes nada desde ahi: es lo ultimo que ocurre.
 
-`on_draw` se dibuja antes que los hijos a proposito, para que el `on_draw` de un hijo
-siga siendo un overlay de verdad por encima del padre.
+Un script **no dibuja**. Como se ve un nodo lo decide el propio nodo, no un script
+suelto encima: si quieres dibujado propio, deriva el nodo y sobrescribe `draw()`, que
+recibe el `clip` activo y lo pasa a sus hijos. Asi el clip lo respeta sin que nadie
+tenga que acordarse de hacerlo.
 
 ### Notas
 
@@ -378,7 +383,7 @@ public:
     void recibirGolpe(int d) { emit_signal("danio", d); }
 };
 
-class BarraDeVida : public Script<NodeUI> {
+class BarraDeVida : public Script<NodeTextMatrix> {
 public:
     explicit BarraDeVida(NodeRef<Node2D> enemigo) : enemigo(std::move(enemigo)) {}
 
@@ -532,10 +537,11 @@ estar ahi. Llama a `clear()` donde signifique algo.
 
 ### Señales que ya emite el motor
 
-`NodeButton` declara `clicked` en su constructor y lo dispara en `handle_click()`. Esa señal
-es la unica via que tiene un boton: antes tambien aceptaba un `set_on_click`, y entonces
-decir "este boton hace algo" tenia dos respuestas distintas, de las que solo una podia
-usarse a la vez. Un boton con dos reactores es un boton con una señal y dos oyentes.
+`Button` declara `clicked` en su constructor y lo dispara en `update()`, en el frame en el que
+aprieta el raton sobre el. Esa señal es la unica via que tiene un boton: antes tambien aceptaba
+un `set_on_click`, y entonces decir "este boton hace algo" tenia dos respuestas distintas, de
+las que solo una podia usarse a la vez. Un boton con dos reactores es un boton con una señal y
+dos oyentes.
 
 ```cpp
 // No hace falta guardar el handle al boton para oírlo.
@@ -587,6 +593,140 @@ un mapa en vez de una declaracion y una lista vacia de reactores. `clear_signals
 llama nadie del motor; existe para el caso de un teardown de escena, donde quieres soltarlos
 antes de que nada mas empiece a emitir en la escena siguiente.
 
+## Botones
+
+`Button` es un `Control` con texto y un `StyleBox`, y reacciona al raton. Sustituye a
+`NodeButton`, que vivia fuera del sistema de layout y por eso no se enteraba de contenedores ni
+de anchors:
+
+```cpp
+NodeRef<Button> ok = panel->add_child<Button>("ok");
+ok->set_text({"Ok"});
+ok->get_stylebox(ButtonState::Normal).set_background_color("blue");
+ok->get_stylebox(ButtonState::Hover).set_background_color("cyan");
+ok->get_stylebox(ButtonState::Pressed).set_background_color("green");
+ok->connect_script_signal("clicked", this, &MiScript::aceptar);
+```
+
+Cada estado lleva su propio `StyleBox` y su propio color de texto, asi que un hover puede ser
+otro fondo y no un intercambio de fg/bg como hacia `NodeButton`. `draw` elige el que toca con
+esta precedencia:
+
+`Disabled` > `Pressed` > `Hover` > `Normal`
+
+O sea que un boton desactivado no se enciende al pasar por encima ni aunque dejes el raton
+apretado encima. Los tres estados que no son `Normal` arrancan vacios y `draw` cae al `Normal`
+si el estado actual no tiene caja propia, asi que un boton sin configurar sigue dibujando.
+
+**El tamano siempre es el del texto.** No hay bandera: un boton nunca puede acabar mas estrecho
+que su propia etiqueta, porque eso es justo lo que no puede hacer un boton. Como en cualquier
+`Control`, eso es un suelo y no un objetivo: `set_size()` y los anchors deciden el tamano real,
+y un boton en una celda ancha se dibuja ancho. El minimo se mide desde `raw_text` solo, asi que
+depende del contenido y no del sitio que le toque.
+
+**Ojo con el primer frame.** El bucle llama a `update()` antes que a `update_layout()`, asi que
+el primer frame no tiene rect resuelto y no puede acertar ningun `is_inside`. A partir del
+segundo va bien. No es un problema del boton: es el orden del bucle.
+
+No hay activacion por teclado ni foco, porque el motor no tiene entrada de teclado. Un boton se
+alcanza solo con el raton.
+
+## Contenedores
+
+`Container` y sus tres derivados colocan a los hijos. Todos dan por hecho lo mismo, y conviene
+saberlo antes de usarlos:
+
+> Un contenedor es dueno de la posicion de sus hijos.
+
+Un hijo dentro de un contenedor no conserva su `local_position`. El contenedor la reescribe en
+cada paso de layout para centrarlo. Lo que sobrevive es la posicion **relativa** al bloque que
+dio el contenedor: un hijo en `{0, 0}` queda en la esquina de ese bloque, uno en `{2, 1}` dos
+columnas y una fila mas adentro. Cada paso quita el desplazamiento anterior antes de aplicar el
+siguiente, asi que esa posicion relativa es estable entre frames en vez de acumularse.
+
+```cpp
+auto root = std::make_unique<Node>("root");
+
+NodeRef<PanelContainer> panel = root->add_child<PanelContainer>("panel", Vec2{0, 0});
+panel->set_anchor_preset(AnchorPreset::FullRect);
+panel->get_stylebox().set_background_color("blue");
+panel->get_stylebox().set_content_margin(1, 1, 1, 1);
+
+NodeRef<Label> titulo = panel->add_child<Label>("titulo");
+titulo->set_text({"Hola"});
+titulo->set_anchor_preset(AnchorPreset::FullRect);
+```
+
+Los cuatro:
+
+| Nodo | Que hace con sus hijos |
+| --- | --- |
+| `Container` | Los apila todos en el centro, encima unos de otros |
+| `HBox` | Una celda por hijo, en fila; anchos se suman, la mas alta manda |
+| `VBox` | Una celda por hijo, en columna; alturas se suman, la mas ancha manda |
+| `PanelContainer` | Estira el hijo dentro del marco y dibuja ese marco con un `StyleBox` |
+
+`HBox` y `VBox` reparten una celda por hijo a lo largo de su eje: la celda es exactamente el
+minimo del hijo, y la separacion va entre celdas, nunca antes de la primera ni despues de la
+ultima. La tira entera la centra despues el `Container` de base, igual que un `Container`
+normal centra su bloque.
+
+```cpp
+NodeRef<HBox> fila = root->add_child<HBox>("fila", Vec2{0, 0});
+fila->set_anchor_preset(AnchorPreset::FullRect);
+fila->set_separation(2);
+
+// Cada hijo reserva 10 columnas. El hijo sigue decidiendo como llena su celda:
+// con FullRect se estira a todo el alto de la fila.
+NodeRef<Label> izq = fila->add_child<Label>("izq");
+izq->set_text({"izq"});
+izq->set_custom_minimum_size({10, 1});
+```
+
+El hijo sigue siendo dueno de **como** llena su celda: el contenedor le da la celda y lo mueve
+hasta ahi, y a partir de ahi mandan sus propios anchors y su `Grow`. Por eso un hijo que quiera
+ocupar el alto entero de un `HBox` se pone `Grow::Both` o el preset `FullRect`.
+
+`PanelContainer` es el unico que rellena en vez de centrar. Le da al hijo todo lo que queda
+dentro del borde y de los margenes del `StyleBox` - el mismo que dibuja `Label`, con color de
+fondo, borde y margen de contenido. El margen cuenta para el minimo del panel, porque es el
+marco del panel y no relleno: un panel estrujado por debajo de sus margenes tiene que perder
+contenido, no sus bordes. Se espera un solo hijo; con varios, todos se estirarian sobre la
+misma zona y se pisarian.
+
+Un detalle que no es obvio: solo los hijos `Control` aportan a `get_minimum_size()`. Un
+`NodeTextMatrix` no tiene minimo que reportar, asi que no reserva sitio - pero si lo mueve el
+centrado, porque es un hijo mas.
+
+### `fit_content`: que un Label reserve sitio para su texto
+
+Por defecto un `Label` no tiene minimo propio: se envuelve en el ancho que le da el layout y
+recorta lo que no quepa. Eso es lo que quiere un Label metido en un marco de tamano fijo, pero
+en un `HBox` significa que el texto no reserva nada y la celda sale a cero.
+
+`fit_content` le dice que reporte el tamano que su texto pide:
+
+```cpp
+NodeRef<Label> titulo = fila->add_child<Label>("titulo");
+titulo->set_text({"Hola"});
+titulo->set_fit_content(true);   // ahora ocupa 4x1 y la fila lo cuenta
+```
+
+Con la propiedad activa, `get_minimum_size()` devuelve la linea mas larga del texto y el numero
+de lineas que ocupa, mas el marco del `StyleBox` para que el texto quepa **dentro** del borde y
+no debajo. Sin ella sigue mandando solo el minimo que haya puesto el llamante.
+
+El minimo responde a una pregunta: **¿hasta donde puede encogerse esto sin que su texto quepa
+dentro?** Esa respuesta depende solo del texto, no del sitio que le toque. Por eso se mide
+partiendo `raw_text` por `\n` con un ancho infinito, y no mirando el wrap actual: un Label
+estrechado reportaria las lineas cortas en las que lo apretaron, y uno estirado una sola linea
+larga. Mismo texto, minimo distinto, decidido por el layout en vez de por el contenido.
+
+Y ojo, que el minimo es un **suelo, no un tope**: `set_size()` y los anchors siguen mandando
+sobre el tamano real, esto solo impide que se quede corto. Un `Label` con `fit_content` y
+`FullRect` sigue ocupando toda la pantalla; la propiedad le dice a los contenedores cuanto
+reservar, no le quita sitio a quien se lo da.
+
 ## Integracion CMake
 
 El motor es una libreria estatica que no depende de nada externo. Tres modos de consumo:
@@ -621,17 +761,18 @@ El requisito de C++17 se propaga automaticamente: no hace falta `set(CMAKE_CXX_S
 ```text
 include/guayaba/     API publica. Ninguna cabecera de plataforma es alcanzable desde aqui.
   Guayaba.hpp        Header umbrella
-  Core/              Vec2, TermChar, Color, Input, NodeType, Script,
+  Core/              Vec2, Rect, TermChar, Color, Input, TextWrap, Script,
                      ScriptRef, Signal, SignalBus, NodeRef, NodeRegistry
   Terminal/          IOSTerminal (interfaz abstracta) + create_system_terminal()
   Renderer/          ConsoleRenderer
-  Nodes/             Node, Node2D, NodeUI, NodeSQ, NodeBox, NodeButton
+  Nodes/             Node, Node2D, NodeTextMatrix
+    UI/              Control, Label, Button, Container,
+                     HBox, VBox, PanelContainer
   Scene/             SceneManager
 src/                 Implementaciones. Privado, no se instala.
   Core/              NodeRegistry, Signal, SignalBus,
                      DeletionQueue (cola de destruccion diferida)
   Terminal/          Backends Linux/macOS (termios) y Windows (Win32)
-examples/consumer/   Demo interactiva con backend simulado
 ```
 
 Los backends de plataforma viven exclusivamente en `src/Terminal/`, de modo que incluir
@@ -644,17 +785,12 @@ uno contra el registro. Esa indireccion es la que hace que un `queue_free()` ani
 no destruya nada dos veces, y que un nodo que el consumidor ya reclamo con
 `remove_child()` no se destruya en absoluto.
 
-## Compilar los ejemplos
+## Compilar el motor
 
 ```bash
-cmake -S examples/consumer -B build -DGUAYABA_CONSUMER_MODE=add_subdirectory
+cmake -S . -B build
 cmake --build build
-
-./build/consumer      # demo interactiva
 ```
-
-`GUAYABA_CONSUMER_MODE` acepta `add_subdirectory`, `FetchContent` o `find_package`
-(este ultimo necesita `CMAKE_PREFIX_PATH` apuntando al motor instalado).
 
 ## IntelliSense en VSCode
 
@@ -668,12 +804,9 @@ La solucion es la base de datos de compilacion, que CMake genera:
 ```bash
 cmake -S . -B build
 cmake --build build
-cmake -S examples/consumer -B build/consumer -DGUAYABA_CONSUMER_MODE=add_subdirectory
-cmake --build build/consumer
 ```
 
-Con eso, `cpptools` detecta `build/compile_commands.json` y `build/consumer/compile_commands.json`
-por su cuenta. Si tu version no los busca en subdirectorios, crea un enlace:
+Con eso, `cpptools` detecta `build/compile_commands.json` por su cuenta.
 
 ```bash
 ln -sf build/compile_commands.json compile_commands.json
