@@ -10,7 +10,7 @@ Container::Container(const std::string& node_name, Vec2 node_position)
 void Container::update_layout(const Rect& parent_rect) {
     // resolve_rect rather than Control::update_layout: the base version would
     // hand our own rect down and then we would have to lay the children out a
-    // second time against the centred one.
+    // second time against the content one.
     resolve_rect(parent_rect);
 
     // Own rect first: the offset is measured against where we actually ended up,
@@ -53,8 +53,8 @@ Vec2 Container::get_minimum_size() const {
 
     // The same floor Control applies between its own two minimums: neither can
     // shrink the other, so a Container forced bigger than its children - by
-    // minimum_size or by its parent - pads the centred block instead of
-    // collapsing to it.
+    // minimum_size or by its parent - pads the block instead of collapsing
+    // to it.
     return {std::max(own.x, content.x), std::max(own.y, content.y)};
 }
 
@@ -62,12 +62,26 @@ Rect Container::content_rect() const {
     const Rect box = get_rect();
 
     // Our own minimum size, which resolve_rect already floored the resolved size
-    // at, so neither offset can be negative and the block cannot overflow us.
+    // at, so the block cannot overflow us and no offset below can go negative.
     const Vec2 content = get_minimum_size();
 
+    // The offset the alignment names, one axis at a time. Begin keeps the block
+    // at the start edge, End pushes it to the end edge, and Center splits the
+    // leftover with an integer division - an odd leftover therefore biases
+    // toward the start edge, the same choice Control::update_layout makes when
+    // it centres a control.
+    auto offset = [this](int extent, int block) {
+        switch (content_alignment) {
+            case ContentAlignment::Begin: return 0;
+            case ContentAlignment::End:   return extent - block;
+            case ContentAlignment::Center: break;
+        }
+        return (extent - block) / 2;
+    };
+
     return Rect{
-        Vec2{box.pos.x + (box.size.x - content.x) / 2,
-             box.pos.y + (box.size.y - content.y) / 2},
+        Vec2{box.pos.x + offset(box.size.x, content.x),
+             box.pos.y + offset(box.size.y, content.y)},
         content,
     };
 }

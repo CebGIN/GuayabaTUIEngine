@@ -13,17 +13,34 @@ namespace guayaba {
     A Container that lays its children out in a column, top to bottom.
 
     The transpose of HBox: each child gets a cell of its own along the vertical
-    axis, every cell is as wide as the strip, and the whole column is then
-    centred inside the VBox.
+    axis. The cross axis fills - every cell spans the full width of the VBox's
+    resolved rect rather than the column's minimum width - so a child that
+    stretches (Grow::Both or the FullRect preset) reaches both edges, and one
+    anchored TopLeft sits at the VBox's left edge rather than at the column's.
 
         +-----------------+
         |  [a]            |
         |  [b]            |  <- each cell is the child's own minimum height
-        |  [c]            |
+        |  [c]            |     and the full width of the VBox
         +-----------------+
 
-    The child still owns its own placement inside its cell, so one that wants to
-    span the full width of the column sets Grow::Both or the FullRect preset.
+    The column of cells is as tall as the children's minimums plus their
+    separations, and content_alignment says where that column sits inside the
+    VBox: at the top (Begin), in the middle (Center, the default) or at the
+    bottom (End). Space the column does not use stays empty, implied by the
+    alignment.
+
+    The space is not always meant to stay empty. If the VBox is taller than the
+    column and at least one child has Grow::Both on the vertical axis, the
+    leftover is split between those children instead: each of their cells grows
+    by an equal share of it, and the remainder goes to the first of them in
+    order. Grow::Both already means "stretch to fill the cell", so a grown cell
+    asks nothing new of the child - a Label with fit_content and Grow::Both
+    becomes a full-height filler whose text stays at its content's top-left.
+
+    The child still owns its own placement inside its cell: the VBox decides
+    how tall the cell is, and the child's own anchors and Grow decide what it
+    does with the cell it was given.
 */
 class VBox : public Container {
     int separation = 0;
