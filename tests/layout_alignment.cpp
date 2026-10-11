@@ -160,6 +160,30 @@ void test_vbox_two_expanders_split_slack() {
     assert(e2->get_rect().bottom() == SCREEN.y);
 }
 
+// Center and End used to add their alignment offset on top of the expanded
+// column, so the expander ran past the bottom edge by that offset. The
+// leftover the alignment would have left empty is exactly the slack the
+// expanders take, so the expanded column is the whole box: it runs edge to
+// edge and the offset against it is zero.
+void test_vbox_expander_alignment_no_overshoot() {
+    const ContentAlignment alignments[] = {ContentAlignment::Center,
+                                           ContentAlignment::End};
+    for (const ContentAlignment alignment : alignments) {
+        std::unique_ptr<VBox> root = std::make_unique<VBox>();
+        root->set_anchor_preset(AnchorPreset::FullRect);
+        root->set_content_alignment(alignment);
+        Control* a = add_vbox_row(*root, {10, 3});
+        Control* e = add_filler_child(*root, {10, 4});
+
+        root->update_layout(Rect::from_size(SCREEN));
+
+        // Slack = 24 - (3 + 4) = 17, all of it on the expander: 4 + 17 = 21.
+        assert((a->get_rect() == Rect{Vec2{0, 0}, Vec2{80, 3}}));
+        assert((e->get_rect() == Rect{Vec2{0, 3}, Vec2{80, 21}}));
+        assert(e->get_rect().bottom() == SCREEN.y);
+    }
+}
+
 // The HBox mirror of test_vbox_center_default: the row is centred on the main
 // axis and every cell is as tall as the box.
 void test_hbox_center_default() {
@@ -239,6 +263,27 @@ void test_hbox_two_expanders_split_slack() {
     assert(e2->get_rect().right() == SCREEN.x);
 }
 
+// The HBox mirror of test_vbox_expander_alignment_no_overshoot: Center and End
+// used to push the expanded cell past the right edge by the alignment offset.
+void test_hbox_expander_alignment_no_overshoot() {
+    const ContentAlignment alignments[] = {ContentAlignment::Center,
+                                           ContentAlignment::End};
+    for (const ContentAlignment alignment : alignments) {
+        std::unique_ptr<HBox> root = std::make_unique<HBox>();
+        root->set_anchor_preset(AnchorPreset::FullRect);
+        root->set_content_alignment(alignment);
+        Control* a = add_hbox_column(*root, {4, 5});
+        Control* e = add_filler_child(*root, {4, 5});
+
+        root->update_layout(Rect::from_size(SCREEN));
+
+        // Slack = 80 - (4 + 4) = 72, all of it on the expander: 4 + 72 = 76.
+        assert((a->get_rect() == Rect{Vec2{0, 0}, Vec2{4, 24}}));
+        assert((e->get_rect() == Rect{Vec2{4, 0}, Vec2{76, 24}}));
+        assert(e->get_rect().right() == SCREEN.x);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -248,11 +293,13 @@ int main() {
     test_vbox_end();
     test_vbox_single_expander();
     test_vbox_two_expanders_split_slack();
+    test_vbox_expander_alignment_no_overshoot();
     test_hbox_center_default();
     test_hbox_begin();
     test_hbox_end();
     test_hbox_single_expander();
     test_hbox_two_expanders_split_slack();
+    test_hbox_expander_alignment_no_overshoot();
 
     std::puts("layout_alignment: all checks passed.");
     return 0;

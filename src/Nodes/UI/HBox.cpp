@@ -62,6 +62,15 @@ void HBox::update_layout(const Rect& parent_rect) {
     const int share = expanders > 0 ? slack / expanders : 0;
     const int remainder = expanders > 0 ? slack % expanders : 0;
 
+    // The shares above hand the expanders the whole leftover, so the strip
+    // they grow ends at the box's own end edge. The offset content_rect()
+    // applied was measured against the smaller, unexpanded block, and adding
+    // it on top of that growth would push the last cell past the right edge -
+    // so with expanders the walk starts at the box's own origin, which is the
+    // same offset recomputed against the expanded block (the box, so zero).
+    // Without them the aligned block stands as content_rect() left it.
+    const int column_start = expanders > 0 ? box.pos.x : block.pos.x;
+
     // The cursor walks the strip left to right. A child with a minimum to
     // report gets a cell exactly that wide - grown first if it is one of the
     // expanders above - and pushes the cursor along by it. A child with none -
@@ -73,7 +82,7 @@ void HBox::update_layout(const Rect& parent_rect) {
     // The gap is added after a cell that took up room rather than before the next
     // one, so a cell that took up none does not leave a gap behind it and split
     // the row into a wider space than the strip actually is.
-    int x = block.pos.x;
+    int x = column_start;
     int expanders_seen = 0;
     for (size_t i = 0; i < children.size(); ++i) {
         const Control* as_control = dynamic_cast<const Control*>(children[i].get());

@@ -40,8 +40,11 @@ namespace guayaba {
     strip and at least one child has Grow::Both on the horizontal axis, the
     leftover is split between those children instead: each of their cells grows
     by an equal share of it, and the remainder goes to the first of them in
-    order. Grow::Both already means "stretch to fill the cell", so a grown cell
-    asks nothing new of the child.
+    order. The expanded strip therefore spans the whole HBox - it is the box,
+    not the minimum - so content_alignment has nothing left to offset and a box
+    with expanders on the horizontal axis lays out edge to edge whatever the
+    alignment says. Grow::Both already means "stretch to fill the cell", so a
+    grown cell asks nothing new of the child.
 
     The child still owns its own placement inside its cell. An HBox gives it the
     cell and moves it there; how the child fills that cell is down to its own
