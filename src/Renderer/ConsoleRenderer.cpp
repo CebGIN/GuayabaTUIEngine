@@ -1,8 +1,62 @@
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
 
 #include <guayaba/Terminal/IOSTerminal.hpp>
 
 namespace guayaba {
+
+namespace {
+
+// The thickest frame that still leaves a cell of content on each side. A box
+// one cell across has no interior to frame, so its border collapses to nothing.
+int max_border_width(const Rect& area) {
+    return std::min(area.size.x, area.size.y) <= 1
+               ? 0
+               : (std::min(area.size.x, area.size.y) + 1) / 2;
+}
+
+struct BorderGlyphs {
+    wchar_t horizontal;
+    wchar_t vertical;
+    wchar_t top_left;
+    wchar_t top_right;
+    wchar_t bottom_left;
+    wchar_t bottom_right;
+};
+
+BorderGlyphs glyphs_for(StyleBorder style, int corner_radius) {
+    switch (style) {
+        case StyleBorder::ASCII:
+            return {L'-', L'|', L'+', L'+', L'+', L'+'};
+        case StyleBorder::DOUBLE:
+            return {L'═', L'║', L'╔', L'╗', L'╚', L'╝'};
+        case StyleBorder::HEAVY:
+            return {L'█', L'█', L'█', L'█', L'█', L'█'};
+        // Rounded corners only exist once a radius is set. Below that the style
+        // degrades to a plain square frame.
+        case StyleBorder::ROUNDED:
+            if (corner_radius > 0) return {L'─', L'│', L'╭', L'╮', L'╰', L'╯'};
+            return {L'-', L'|', L'+', L'+', L'+', L'+'};
+        case StyleBorder::DASHED:
+        case StyleBorder::NONE:
+        default:
+            return {L'-', L'|', L'+', L'+', L'+', L'+'};
+    }
+}
+
+// Picks the joint glyph for a corner cell. At cell resolution a corner is a
+// single cell, so corner_radius cannot bend a curve here: it only decides
+// whether glyphs_for() hands back arc joints or the style's square ones.
+// Real curvature would need sub-cell geometry this grid does not have.
+wchar_t corner_glyph(const BorderGlyphs& g, bool on_top, bool on_left) {
+    if (on_top) return on_left ? g.top_left : g.top_right;
+    return on_left ? g.bottom_left : g.bottom_right;
+}
+
+} // namespace
 
 ConsoleRenderer::ConsoleRenderer(Vec2 buffer_size, IOSTerminal* terminal)
     : console_buffer_size(buffer_size), terminal_instance(terminal)
@@ -32,19 +86,121 @@ void ConsoleRenderer::clear_buffer() {
     }
 }
 
-void ConsoleRenderer::put_char(Vec2 pos, wchar_t character, uint16_t fg, uint16_t bg) {
-    if (pos.x >= 0 && pos.x < console_buffer_size.x &&
-        pos.y >= 0 && pos.y < console_buffer_size.y) {
-            int index = pos.y * console_buffer_size.x + pos.x;
-            screen_buffer[index].character = character;
-            screen_buffer[index].foreground = fg;
-            screen_buffer[index].background = bg;
-        }
+void ConsoleRenderer::put_char(Vec2 pos, wchar_t character, uint16_t fg, uint16_t bg,
+                               const Rect& clip) {
+    // The buffer bound and the clip are independent: the clip can sit well
+    // inside the buffer, or outside it entirely.
+    if (clip.is_empty()) return;
+    if (pos.x < 0 || pos.x >= console_buffer_size.x ||
+        pos.y < 0 || pos.y >= console_buffer_size.y) return;
+    if (!clip.contains(pos)) return;
+
+    int index = pos.y * console_buffer_size.x + pos.x;
+    screen_buffer[index].character = character;
+    screen_buffer[index].foreground = fg;
+    screen_buffer[index].background = bg;
 }
 
-void ConsoleRenderer::put_string(Vec2 pos, const std::string& text, uint16_t fg, uint16_t bg) {
-    for (size_t i = 0; i < text.length(); ++i) {
-        put_char(pos + Vec2{static_cast<int>(i), 0}, static_cast<wchar_t>(text[i]), fg, bg);
+void ConsoleRenderer::put_text(Vec2 origin, const std::vector<std::string>& lines, uint16_t fg,
+                               uint16_t bg, const Rect& clip) {
+    if (lines.empty() || clip.is_empty()) return;
+
+    // The block the text would occupy if nothing clipped it, so the visible
+    // window below is measured against the real content rather than the line
+    // count alone: trailing short lines must not widen or narrow the slice.
+    int widest = 0;
+    for (const std::string& line : lines) {
+        widest = std::max(widest, (int)line.size());
+    }
+    if (widest <= 0) return;
+
+    const Rect content{origin, Vec2{widest, (int)lines.size()}};
+    const Rect visible = content.intersection(clip);
+    if (visible.is_empty()) return;
+
+    // Offsets and limits, worked out once before any character is touched, so
+    // the loop below walks only what is actually on screen.
+    const int ox = visible.left() - content.left();
+    const int oy = visible.top() - content.top();
+
+    for (int row = 0; row < visible.size.y; ++row) {
+        const int line_index = oy + row;
+        if (line_index >= (int)lines.size()) break;
+
+        const std::string& line = lines[line_index];
+        // A short line contributes only what it has; the rest of that row's
+        // window is simply not written.
+        const int end = std::min(ox + visible.size.x, (int)line.size());
+        for (int col = ox; col < end; ++col) {
+            put_char(Vec2{content.left() + col, content.top() + line_index}, line[col], fg, bg,
+                     visible);
+        }
+    }
+}
+
+void ConsoleRenderer::fill_rect(const Rect& area, wchar_t ch, uint16_t fg, uint16_t bg,
+                               const Rect& clip) {
+    const Rect visible = area.intersection(clip);
+    if (visible.is_empty()) return;
+
+    for (int y = visible.top(); y < visible.bottom(); ++y) {
+        for (int x = visible.left(); x < visible.right(); ++x) {
+            put_char(Vec2{x, y}, ch, fg, bg, visible);
+        }
+    }
+}
+
+void ConsoleRenderer::draw_box(const Rect& area, StyleBorder style, uint16_t fg, uint16_t bg,
+                               int width, int corner_radius, const Rect& clip) {
+    if (area.is_empty() || clip.is_empty()) return;
+
+    const BorderGlyphs g = glyphs_for(style, corner_radius);
+    const int rings = std::clamp(width, 0, max_border_width(area));
+
+    // Each cell of thickness is a ring inset by one more cell than the last.
+    for (int ring = 0; ring < rings; ++ring) {
+        const Rect band = area.grown(-ring, -ring);
+        if (band.is_empty()) break;
+
+        // Only the part of this ring that survives the clip is walked. The
+        // corners still see their own band geometry, so a ring cut in half
+        // keeps drawing the same joint it would have drawn when whole.
+        const Rect visible = band.intersection(clip);
+        if (visible.is_empty()) continue;
+
+        const int x0 = band.left();
+        const int x1 = band.right() - 1;
+        const int y0 = band.top();
+        const int y1 = band.bottom() - 1;
+
+        for (int y = visible.top(); y < visible.bottom(); ++y) {
+            for (int x = visible.left(); x < visible.right(); ++x) {
+                const bool on_top = (y == y0);
+                const bool on_bottom = (y == y1);
+                const bool on_left = (x == x0);
+                const bool on_right = (x == x1);
+
+                // Never repaint the interior: the fill owns those cells.
+                if (!on_top && !on_bottom && !on_left && !on_right) continue;
+
+                wchar_t glyph = 0;
+                if (on_top || on_bottom) glyph = g.horizontal;
+                if (on_left || on_right) glyph = g.vertical;
+
+                if ((on_top || on_bottom) && (on_left || on_right)) {
+                    glyph = corner_glyph(g, on_top, on_left);
+                } else if (style == StyleBorder::DASHED) {
+                    // Break each run against the cell it starts at, so every
+                    // edge opens with a dash. Phasing off the absolute
+                    // coordinate instead would blank a whole side whenever the
+                    // box's parity happened to skip every other row or column.
+                    const int offset = (on_top || on_bottom) ? (x - x0) : (y - y0);
+                    if (offset % 2 != 0) continue;
+                }
+
+                if (glyph != 0) put_char(Vec2{x, y}, glyph, fg, bg, visible);
+            }
+        }
     }
 }
 
