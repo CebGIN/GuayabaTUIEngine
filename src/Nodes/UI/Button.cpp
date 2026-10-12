@@ -108,8 +108,11 @@ void Button::draw(ConsoleRenderer& renderer, const Rect& clip) {
         return;
     }
 
+    // The text takes the same background apply() just filled with, so a banded
+    // button shows no holes; a state without one keeps the old transparent text.
+    const uint16_t bg = box.has_background() ? *box.get_background_color() : 0;
     renderer.put_text(content.pos, wrapped_lines, text_colors[static_cast<int>(state)],
-                      /*bg=*/0, text_clip(clip));
+                      bg, text_clip(clip));
 
     // Hand back to Control so the script hook still runs and children are drawn
     // with the clip Control narrows for them.
