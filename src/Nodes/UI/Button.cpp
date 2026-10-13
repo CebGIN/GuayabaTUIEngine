@@ -129,8 +129,25 @@ void Button::draw(ConsoleRenderer& renderer, const Rect& clip) {
     // The text takes the same background apply() just filled with, so a banded
     // button shows no holes; a state without one keeps the old transparent text.
     const uint16_t bg = box.has_background() ? *box.get_background_color() : 0;
-    renderer.put_text(content.pos, wrapped_lines, text_colors[static_cast<int>(state)],
-                      bg, text_clip(clip));
+
+    // Alignment slides the whole block of lines sideways inside the content rect.
+    // The widest line decides, so every line stays flush with the same block edge;
+    // text wider than the content is left where it is and clipped, never pushed
+    // further out of view.
+    int text_x = content.pos.x;
+    if (text_align != TextAlign::Left) {
+        int widest = 0;
+        for (const std::string& line : wrapped_lines) {
+            widest = std::max(widest, static_cast<int>(line.size()));
+        }
+        const int room = content.size.x - widest;
+        if (room > 0) {
+            text_x += (text_align == TextAlign::Center) ? room / 2 : room;
+        }
+    }
+
+    renderer.put_text({text_x, content.pos.y}, wrapped_lines,
+                      text_colors[static_cast<int>(state)], bg, text_clip(clip));
 
     // Hand back to Control so the script hook still runs and children are drawn
     // with the clip Control narrows for them.

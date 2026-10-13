@@ -666,6 +666,13 @@ que su propia etiqueta, porque eso es justo lo que no puede hacer un boton. Como
 y un boton en una celda ancha se dibuja ancho. El minimo se mide desde `raw_text` solo, asi que
 depende del contenido y no del sitio que le toque.
 
+**Alineacion del texto.** Por defecto el texto va pegado a la izquierda del content rect.
+`set_text_align(TextAlign::Center)` (o `Right`) lo mueve dentro de esa caja sin tocar el wrap ni
+el minimo, que viene bien cuando el boton acaba en una celda mas ancha de lo que pidio - un
+encabezado de tabla que llena su columna, por ejemplo. La linea mas ancha manda, asi que todas las
+lineas quedan pegadas al mismo borde del bloque; un texto mas ancho que la caja se deja donde esta
+y se recorta, no se empuja mas fuera de la vista.
+
 **Ojo con el primer frame.** El bucle llama a `update_layout()` antes que a `update()`, asi que
 cuando `update()` corre ya hay rect resuelto este frame. El hover, que se lee de `Input` en
 `update()`, acierta desde el primer frame.

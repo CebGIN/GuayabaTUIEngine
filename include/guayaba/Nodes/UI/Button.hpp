@@ -28,6 +28,17 @@ enum class ButtonState {
     Disabled,
 };
 
+// Where the text sits horizontally inside the content rect. Left is the default
+// and the historical behaviour - a Button is dragged into a wider cell than it
+// asked for often enough (a table header filling its column, say) that centring
+// it in that cell is worth naming. The lines of a wrapped label move together as
+// one block, the same way Container alignment moves a block.
+enum class TextAlign {
+    Left,
+    Center,
+    Right,
+};
+
 /*
     A Control that shows text inside a StyleBox and reacts to a left click.
 
@@ -78,6 +89,8 @@ protected:
 
     std::string raw_text;
     std::vector<std::string> wrapped_lines;
+
+    TextAlign text_align = TextAlign::Left;
 
     bool hovered = false;
     bool disabled = false;
@@ -131,6 +144,11 @@ public:
 
     // The lines as last wrapped. Derived state; set raw_text through set_text().
     const std::vector<std::string>& get_wrapped_lines() const { return wrapped_lines; }
+
+    // Where the text sits in the content rect. Left by default; Center or Right
+    // only moves it, they do not change the wrap or the minimum size.
+    TextAlign get_text_align() const { return text_align; }
+    void set_text_align(TextAlign alignment) { text_align = alignment; }
 
     // --- Appearance ---------------------------------------------------------
 
