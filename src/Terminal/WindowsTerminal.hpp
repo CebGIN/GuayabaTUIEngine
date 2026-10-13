@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include <guayaba/Core/InputEvent.hpp>
+#include <guayaba/Core/Key.hpp>
 #include <guayaba/Core/TermChar.hpp>
 #include <guayaba/Core/Vec2.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
@@ -32,10 +34,23 @@ private:
     bool l_click_just_pressed = false;
     bool r_click_just_pressed = false;
 
+    int wheel_delta = 0;
+
+    std::vector<InputEvent> input_events;
+
+    // Keys that went down during the last poll, so was_key_pressed() can answer
+    // after the events themselves have been drained.
+    std::vector<Key> keys_pressed;
+
     // Convert our platform-neutral color ID (0-15) to Windows WORD foreground attribute
     static WORD color_id_to_win_fg(uint16_t color_id);
 
     static WORD color_id_to_win_bg(uint16_t color_id);
+
+    // Maps a Windows virtual-key code to a Key, or Key::UNKNOWN.
+    static Key vk_to_key(int virtual_key);
+
+    void emit_key(Key key, bool pressed, char32_t text, bool ctrl, bool shift, bool alt);
 
 public:
     void init() override;
@@ -53,6 +68,10 @@ public:
     bool is_right_click_pressed() const override;
     bool is_left_click_just_pressed() const override;
     bool is_right_click_just_pressed() const override;
+
+    std::vector<InputEvent> take_input_events() override;
+    bool was_key_pressed(Key key) const override;
+    int get_wheel_delta() const override;
 
     std::string get_line_input(Vec2 position) override;
 };

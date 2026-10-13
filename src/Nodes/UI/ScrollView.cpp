@@ -129,44 +129,77 @@ Vec2 ScrollView::get_minimum_size() const {
 }
 
 void ScrollView::update(double delta_time) {
-    // Everything below hit-tests the rects resolved last frame, which are also
-    // the ones this frame draws. Layout runs between update() and draw(), so using
-    // the freshest rect here would mean reacting to a size the user has not seen.
+    // No input here: the drag and the wheel arrive through on_gui_input. Only the
+    // visual/layout side is left to update().
+    PanelContainer::update(delta_time);
+}
+
+bool ScrollView::can_receive_input(const InputEvent& event) const {
+    if (event.type == InputEvent::Type::KEY) return is_focused();
+
+    // While dragging, capture motion and release wherever the pointer is, or the
+    // drag would stall the moment it left the handle.
+    if (dragging) {
+        return event.type == InputEvent::Type::MOUSE_MOTION ||
+               event.type == InputEvent::Type::MOUSE_BUTTON;
+    }
+
+    if (event.type == InputEvent::Type::MOUSE_BUTTON && event.pressed) {
+        // The handle lives outside get_rect(), so is_inside would refuse it.
+        return handle_rect().contains(event.mouse_pos);
+    }
+    if (event.type == InputEvent::Type::MOUSE_WHEEL) {
+        return has_overflow() && is_inside(event.mouse_pos);
+    }
+    return false;
+}
+
+bool ScrollView::on_gui_input(const InputEvent& event) {
     const Rect track = track_rect();
     const Rect handle = handle_rect();
 
-    if (!dragging && Input::l_click_just_pressed && !track.is_empty()) {
-        if (handle.contains(Input::mouse_pos)) {
-            // Grabbed, not jumped to: the pointer stays the same distance from
-            // the handle's top, so the content under the cursor keeps the cursor.
-            dragging = true;
-            grab_offset = Input::mouse_pos.y - handle.pos.y;
-        }
+    if (event.type == InputEvent::Type::MOUSE_WHEEL) {
+        if (!has_overflow()) return false;
+        // Positive wheel is up, which scrolls toward the top (a smaller offset).
+        scroll_by(Vec2{0, -event.wheel_delta});
+        return true;
     }
 
-    if (dragging) {
-        // The drag ends on release wherever the pointer is, rather than by
-        // hit-testing the track: a fast drag can leave the track entirely, and
-        // dropping the handle then would be the one case the handle cannot be
-        // put back. set_scroll_offset clamps, so the resting place is legal.
-        if (!Input::l_click) {
-            dragging = false;
-        } else {
-            const int travel = std::max(0, track.size.y - handle.size.y);
-            const int from_track_top = Input::mouse_pos.y - track.pos.y - grab_offset;
-
-            // Empty range means there is nothing to scroll to, so the offset is
-            // left alone rather than divided by zero or snapped to the end.
-            if (travel > 0 && max_scroll_offset() > 0) {
-                const int moved = std::clamp(from_track_top, 0, travel);
-                set_scroll_offset(Vec2{scroll_offset.x,
-                                       static_cast<int>(static_cast<long long>(moved) *
-                                                        max_scroll_offset() / travel)});
+    if (event.type == InputEvent::Type::MOUSE_BUTTON) {
+        if (event.pressed && event.mouse_button == MouseButton::LEFT) {
+            if (!track.is_empty() && handle.contains(event.mouse_pos)) {
+                // Grabbed, not jumped to: the pointer stays the same distance
+                // from the handle's top, so the content under the cursor keeps
+                // the cursor.
+                dragging = true;
+                grab_offset = event.mouse_pos.y - handle.pos.y;
+                return true;
             }
+        } else if (!event.pressed && event.mouse_button == MouseButton::LEFT &&
+                   dragging) {
+            // The drag ends on release wherever the pointer is, rather than by
+            // hit-testing the track: a fast drag can leave the track entirely.
+            dragging = false;
+            return true;
         }
     }
 
-    PanelContainer::update(delta_time);
+    if (event.type == InputEvent::Type::MOUSE_MOTION && dragging) {
+        const int travel = std::max(0, track.size.y - handle.size.y);
+        const int from_track_top = event.mouse_pos.y - track.pos.y - grab_offset;
+
+        // Empty range means there is nothing to scroll to, so the offset is left
+        // alone rather than divided by zero or snapped to the end.
+        if (travel > 0 && max_scroll_offset() > 0) {
+            const int moved = std::clamp(from_track_top, 0, travel);
+            set_scroll_offset(Vec2{scroll_offset.x,
+                                   static_cast<int>(static_cast<long long>(moved) *
+                                                    max_scroll_offset() / travel)});
+        }
+        return true;
+    }
+
+    return false;
 }
 
 void ScrollView::update_layout(const Rect& parent_rect) {

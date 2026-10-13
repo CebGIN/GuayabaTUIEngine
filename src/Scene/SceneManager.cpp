@@ -1,5 +1,7 @@
+#include <guayaba/Core/Focus.hpp>
 #include <guayaba/Core/Input.hpp>
 #include <guayaba/Core/Rect.hpp>
+#include <guayaba/Core/SignalBus.hpp>
 #include <guayaba/Nodes/Node.hpp>
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
 #include <guayaba/Scene/SceneManager.hpp>
@@ -72,9 +74,11 @@ void SceneManager::start_running() {
     } terminal_guard{os_terminal.get()};
 
     while (this->is_running) {
-        
+
         //Cambio de escena
         if (next_scene){
+            // Before exit_tree, so a control still exists to hear focus_exited.
+            FocusManager::get_instance().clear();
             if (root_node) root_node->exit_tree();
             root_node = std::move(next_scene);
             if (root_node) root_node->enter_tree();
@@ -84,13 +88,47 @@ void SceneManager::start_running() {
 
             renderer.resize(os_terminal->get_screen_size(renderer.get_buffer_size()));
             renderer.clear_buffer();
+
+            /*
+                Five steps, in this order, and the order is the contract:
+
+                  refresh_input()  what the user did this frame
+                  update_layout()  where everything is, knowing that
+                  route_input()    who acts on it, against those rects
+                  process_scene()  per-frame logic, seeing the result
+                  draw()           the picture
+
+                Layout comes before input because routing hit-tests: a control
+                that resized this frame is tested against the size it will be
+                drawn at, not last frame's. Input comes before update, so a
+                control that acted on a key has done so before a script reads its
+                state in the same frame.
+            */
             Input::refresh_input();
 
-            this->process_scene();
+            // Held in a local: route_input takes the vector by reference so a
+            // control can consume an event by removing it.
+            std::vector<InputEvent> events = Input::drain_input_events();
 
             // Layout before draw, and after the resize above so Controls
             // measure against the buffer size actually about to be painted.
             this->root_node->update_layout(Rect::from_size(renderer.get_buffer_size()));
+
+            this->root_node->route_input(events);
+
+            // Whatever nobody consumed, offered to scripts and to the bus as the
+            // unhandled fallback - where a global shortcut belongs, so it does not
+            // fire while a focused control is eating keys.
+            if (!events.empty()) {
+                SignalBus& bus = SignalBus::get_instance();
+                const bool bus_listens = bus.is_declared("unhandled_input");
+                for (const InputEvent& event : events) {
+                    this->root_node->route_unhandled_input(event);
+                    if (bus_listens) bus.emit_signal("unhandled_input", event);
+                }
+            }
+
+            this->process_scene();
 
             // The clip starts as the whole buffer, and narrows from there as
             // it passes down through any Control that clips.

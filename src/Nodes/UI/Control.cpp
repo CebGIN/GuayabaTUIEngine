@@ -1,7 +1,10 @@
 #include <algorithm>
 #include <cmath>
 
+#include <guayaba/Core/Focus.hpp>
 #include <guayaba/Core/NodeRef.hpp>
+#include <guayaba/Core/NodeRegistry.hpp>
+#include <guayaba/Core/Script.hpp>
 #include <guayaba/Nodes/UI/Control.hpp>
 
 namespace guayaba {
@@ -203,6 +206,97 @@ void Control::draw(ConsoleRenderer& renderer, const Rect& clip) {
     // governs what this node contains, not whether the node itself is visible.
     const Rect child_clip = get_child_clip(clip);
     Node::draw(renderer, child_clip);
+}
+
+// --- Input ------------------------------------------------------------------
+
+void Control::route_input(std::vector<InputEvent>& events) {
+    const uint64_t my_id = instance_id();
+    if (!detail::NodeRegistry::instance().is_live(my_id)) return;
+
+    // Children in reverse: a later sibling draws on top, so it gets first refusal.
+    // The reverse walk is done here rather than by calling Node::route_input, whose
+    // forward walk would visit every subtree twice.
+    for (size_t i = children.size(); i > 0; --i) {
+        if (i - 1 >= children.size()) continue;
+        children[i - 1]->route_input(events);
+
+        if (!detail::NodeRegistry::instance().is_live(my_id)) return;
+        if (events.empty()) return;
+    }
+
+    // This control's turn, over every event the children left. An event it
+    // consumes is erased; one it declines stays for whoever comes next.
+    for (size_t i = 0; i < events.size();) {
+        if (!can_receive_input(events[i])) {
+            ++i;
+            continue;
+        }
+        if (handle_input(events[i])) {
+            events.erase(events.begin() + static_cast<std::ptrdiff_t>(i));
+            // Do not advance: the next event shifted into this slot.
+        } else {
+            ++i;
+        }
+    }
+
+    // The script gets what the control's own gui handling left.
+    if (script) {
+        for (size_t i = 0; i < events.size();) {
+            if (script->on_input(events[i])) {
+                events.erase(events.begin() + static_cast<std::ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
+        }
+    }
+}
+
+bool Control::can_receive_input(const InputEvent& event) const {
+    switch (event.type) {
+        case InputEvent::Type::MOUSE_MOTION:
+        case InputEvent::Type::MOUSE_BUTTON:
+        case InputEvent::Type::MOUSE_WHEEL:
+            return is_inside(event.mouse_pos);
+
+        case InputEvent::Type::KEY:
+            // Keys go to the focused control and to nothing else.
+            return is_focused();
+    }
+    return false;
+}
+
+bool Control::handle_input(const InputEvent& event) {
+    if (!can_receive_input(event)) return false;
+
+    // Announced before the behaviour, so a listener hears the event whether or
+    // not on_gui_input consumes it.
+    emit_signal("gui_input", event);
+
+    return on_gui_input(event);
+}
+
+bool Control::on_gui_input(const InputEvent& event) {
+    (void)event;
+    return false;
+}
+
+// --- Focus ------------------------------------------------------------------
+
+void Control::grab_focus() {
+    if (focus_mode == FocusMode::NONE) return;
+    FocusManager::get_instance().set_focused(this);
+}
+
+void Control::release_focus() {
+    if (!focused) return;
+    FocusManager::get_instance().set_focused(nullptr);
+}
+
+void Control::set_focused_internal(bool now_focused) {
+    if (focused == now_focused) return;
+    focused = now_focused;
+    emit_signal(now_focused ? "focus_entered" : "focus_exited");
 }
 
 } // namespace guayaba

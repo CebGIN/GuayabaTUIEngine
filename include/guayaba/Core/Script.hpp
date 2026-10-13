@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <guayaba/Core/InputEvent.hpp>
 #include <guayaba/Core/SignalBus.hpp>
 #include <guayaba/Nodes/Node.hpp>
 
@@ -121,6 +122,23 @@ public:
 
     // Every frame, for as long as the node is in the tree.
     virtual void on_process(double delta_time) { (void)delta_time; }
+
+    /*
+        Input for a node with a script, the way a Godot node overrides _input /
+        _unhandled_input.
+
+        on_input is called during the tree walk, after this node's children; the
+        walk visits ancestors last, so a script on the root naturally sees only
+        what nothing below it claimed. Return true to consume the event and stop
+        it there.
+
+        on_unhandled_input is the explicit fallback: the frame loop calls it for
+        whatever routing left over, on every node with a script in tree order.
+
+        Both default to doing nothing, so a draw-only script does not stub them.
+    */
+    virtual bool on_input(const InputEvent& event) { (void)event; return false; }
+    virtual void on_unhandled_input(const InputEvent& event) { (void)event; }
 
     const std::string& get_script_name() const { return script_name; }
     void set_script_name(std::string name) { script_name = std::move(name); }

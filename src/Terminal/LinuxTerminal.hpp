@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include <guayaba/Core/InputEvent.hpp>
+#include <guayaba/Core/Key.hpp>
 #include <guayaba/Core/TermChar.hpp>
 #include <guayaba/Core/Vec2.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
@@ -31,6 +33,32 @@ private:
     bool l_click_just_pressed = false;
     bool r_click_just_pressed = false;
 
+    int wheel_delta = 0;
+
+    /*
+        Raw bytes read but not yet turned into events. A read can split a
+        sequence arbitrarily - an arrow key's three bytes landing in two reads, a
+        paste of thirty keystrokes - so a partial tail is held here and completed
+        next poll instead of being guessed at.
+    */
+    std::string pending_bytes;
+
+    // Whether a lone ESC has already waited one poll. A trailing ESC is
+    // ambiguous: Escape pressed, or the first byte of a sequence yet to arrive.
+    // After one empty poll it is taken as the Escape key.
+    bool esc_waiting = false;
+
+    // What the terminal sent since the last drain, and the set of keys that went
+    // down this poll (kept apart so was_key_pressed survives the drain).
+    std::vector<InputEvent> input_events;
+    std::vector<Key> keys_pressed;
+
+    // Modifiers as last reported by a named sequence. A terminal reports these
+    // only alongside a cursor or function key, never on their own.
+    bool shift_held = false;
+    bool ctrl_held = false;
+    bool alt_held = false;
+
     // Map color ID (0-15) to ANSI foreground code (30-37, 90-97)
     static int color_id_to_ansi_fg(uint16_t id);
 
@@ -46,6 +74,16 @@ private:
 
     // Parse SGR mouse event: \x1b[<button;x;y{M|m}
     bool parse_sgr_mouse(const char* buf, int len);
+
+    // Turns pending_bytes into events, consuming what it recognises. Returns how
+    // many leading bytes were used; an incomplete tail is left pending.
+    std::size_t consume_input_bytes();
+
+    // Pushes a key event and records the key as pressed this poll.
+    void emit_key(Key key, bool pressed, char32_t text, bool ctrl, bool shift, bool alt);
+
+    void emit_mouse_button(MouseButton button, bool pressed);
+    void emit_mouse_motion();
 
 public:
     void init() override;
@@ -63,6 +101,10 @@ public:
     bool is_right_click_pressed() const override;
     bool is_left_click_just_pressed() const override;
     bool is_right_click_just_pressed() const override;
+
+    std::vector<InputEvent> take_input_events() override;
+    bool was_key_pressed(Key key) const override;
+    int get_wheel_delta() const override;
 
     std::string get_line_input(Vec2 position) override;
 };

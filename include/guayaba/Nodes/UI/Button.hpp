@@ -53,15 +53,16 @@ enum class ButtonState {
     Measured from raw_text alone, so the answer does not depend on the size the
     layout handed out. See TextWrap::measure_text.
 
-    PRESSING
-    "Pressed" means the left button is held while the pointer is over this
-    Button, and "clicked" fires on the frame the press begins. Both are read from
-    Input in update(), so a Button sees the mouse one frame before it is drawn
-    against the layout that frame - the rect it tests is the one resolved last
-    frame, which is the same rect it draws with.
+    PRESSING AND ACTIVATION
+    "Pressed" (the visual state) means the left button is held while the pointer
+    is over this Button; the hover state is still read from Input in update(),
+    because a Control only receives a mouse event when the pointer is inside it
+    and so cannot clear hover on the way out.
 
-    There is no keyboard activation and no focus, because the engine has no key
-    input to build on. A Button is reachable by pointer only.
+    The ACTIVATION - emitting "clicked" - happens in on_gui_input, so a press
+    reaches exactly one control through routing. A Button also activates on
+    Enter or Space while it holds the focus, which is what makes it keyboard
+    reachable; its FocusMode defaults to CLICK.
 
     "clicked" is a signal, declared in the constructor and the only way to say
     what a Button does. There is deliberately no set_on_click: two callbacks
@@ -93,6 +94,9 @@ protected:
     // rect when the Button clips. Horizontal overflow is left to an ancestor and
     // vertical overflow is cut here, at the Button's own bottom.
     Rect text_clip(const Rect& incoming) const;
+
+    // Activation: a left press inside the Button, or Enter/Space while focused.
+    bool on_gui_input(const InputEvent& event) override;
 
 public:
     explicit Button(const std::string& node_name = "Unnamed Button",

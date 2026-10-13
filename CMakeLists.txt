@@ -109,4 +109,10 @@ option(GUAYABA_BUILD_TESTS "Build GuayabaTUIEngine's headless layout tests" OFF)
 if(GUAYABA_BUILD_TESTS)
     add_executable(layout_alignment tests/layout_alignment.cpp)
     target_link_libraries(layout_alignment PRIVATE GuayabaTUIEngine)
+
+    add_executable(key_parsing tests/key_parsing.cpp)
+    target_link_libraries(key_parsing PRIVATE GuayabaTUIEngine)
+
+    add_executable(input_routing tests/input_routing.cpp)
+    target_link_libraries(input_routing PRIVATE GuayabaTUIEngine)
 endif()

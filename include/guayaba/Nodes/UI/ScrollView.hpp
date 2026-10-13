@@ -73,12 +73,9 @@ namespace guayaba {
 
     WHY A HANDLE AND NOT A WHEEL
 
-    The engine has no wheel input: IOSTerminal exposes mouse position and the two
-    click buttons, and nothing else. Rather than fake a wheel, this exposes an
-    ordinary draggable handle, which the terminal can answer with the click input
-    it already has. Wheel support is still the better input for a list and is
-    still missing; when it arrives, scrolling becomes a second path into the same
-    set_scroll_offset() that dragging already uses.
+    The handle is the primary input: pressing it and dragging maps the pointer
+    across the content extent. The wheel is also accepted, now that the engine
+    has wheel events, and both funnel into the same set_scroll_offset().
 
     HOW THE DRAG WORKS
 
@@ -86,8 +83,10 @@ namespace guayaba {
     pointer was, so the handle does not jump to centre itself under the cursor.
     While the button is held, the pointer's distance from the top of the track is
     mapped across the content extent. Releasing ends the drag, wherever the
-    pointer is - the offset is clamped by the layout pass, so a drag released
-    past the end rests at the end.
+    pointer is - the offset is clamped by the layout pass, so a drag released past
+    the end rests at the end. While dragging the view captures mouse events
+    regardless of the pointer position (see can_receive_input), so a fast drag
+    that leaves the track is still followed.
 
     The handle is only grabbed on a press, so it is never scrolled by the pointer
     merely passing over it, and a drag that starts on the handle cannot be stolen
@@ -156,6 +155,12 @@ public:
     void update(double delta_time) override;
 
     void update_layout(const Rect& parent_rect) override;
+
+    // The handle drag and the wheel are routed input now, not polled: a press on
+    // the handle starts the drag, and while dragging this view captures motion and
+    // release wherever the pointer is.
+    bool can_receive_input(const InputEvent& event) const override;
+    bool on_gui_input(const InputEvent& event) override;
 
     Vec2 get_minimum_size() const override;
 

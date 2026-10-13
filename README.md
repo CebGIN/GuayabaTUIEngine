@@ -555,14 +555,46 @@ Y en el bus, desde `Input::refresh_input()`, que el bucle ya llama **antes** de
 |---|---|---|
 | `mouse_clicked` | `(int boton, Vec2 posicion)` | 1 = izquierdo, 2 = derecho. Como maximo una por frame, y si los dos botones caen en el mismo poll gana el izquierdo: el terminal entrega dos booleanos, no una cola de eventos |
 | `mouse_moved` | `(Vec2 posicion)` | solo cuando la posicion **ha cambiado** desde el refresh anterior, y por tanto **tampoco en el primer frame**, cuando todavia no hay posicion anterior con la que comparar |
+| `input` | `(const InputEvent&)` | cada evento, **antes** del recorrido del arbol. La vista ambiente: un observador ve todo, lo consuma despues un control o no |
+| `unhandled_input` | `(const InputEvent&)` | lo que el recorrido del arbol **no** consumio. Aqui van los atajos globales: una tecla que se come un campo con foco no llega hasta aqui |
 
 El boton es un `int` y no un enum a proposito, para que un reactor pueda compararlo sin
 incluir esta cabecera.
 
-**No hay `key_pressed` porque el motor no tiene entrada de teclado.** `IOSTerminal` expone
-`poll_events`, el raton y lecturas de texto bloqueantes, y nada mas. Anadirla significa
-meter un poll de teclas en `IOSTerminal` y en los dos backends primero; en ese momento
-`key_pressed` encaja aqui al lado de las otras dos.
+**La entrada de teclado existe.** `IOSTerminal` expone `take_input_events()`,
+`was_key_pressed(Key)` y `get_wheel_delta()`, y los dos backends convierten teclas, rueda y
+raton a `InputEvent`. Ademas de las señales del bus, un `Script` puede reaccionar sin tocar
+el bus: `on_input(event)` (consumible, durante el recorrido) y `on_unhandled_input(event)`
+(el resto). Ver "Entrada enrutada".
+
+### Entrada enrutada
+
+La entrada no se difunde a los controles: se **recorre el arbol** y cada control puede
+**consumir** el evento, que es lo que impide que el mismo clic active dos controles.
+
+El orden del bucle es el contrato:
+
+    refresh_input()  que hizo el usuario este frame
+    update_layout()  donde esta cada cosa, sabiendolo
+    route_input()    quien actua, contra esos rects
+    process_scene()  logica por frame, viendo el resultado
+    draw()           el dibujo
+
+`Node::route_input(events)` visita los hijos en **orden inverso** (el hermano que se dibuja
+encima tiene la primera opcion) y luego ofrece lo que queda a su script con `on_input`. Un
+`Control`, antes del script, decide con `can_receive_input` (raton si el puntero esta encima,
+tecla si tiene el foco) y llama a `handle_input`, que emite la señal `gui_input` y delega en
+`on_gui_input`. Devolver `true` consume: el evento se borra del vector.
+
+Lo que nadie consumio se entrega a `Node::route_unhandled_input`, que llama a
+`Script::on_unhandled_input` nodo a nodo, y se emite por el bus como `unhandled_input`. Ese es
+el sitio de un atajo global ("pulsa q para salir"): si un campo con foco consume la tecla, el
+atajo no se dispara.
+
+`FocusManager` guarda quien tiene el foco (uno en todo el proceso, por id, asi que un control
+liberado lo pierde sin quedarse colgando). `Control::grab_focus()` lo pide y `focus_mode`
+(`NONE`/`CLICK`/`ALL`) decide quien es candidato; `focus_next()`/`focus_prev()` recorren el
+arbol para el Tab. Al cambiar de escena el foco se limpia.
 
 ### Consultas y limpieza
 
@@ -624,12 +656,14 @@ que su propia etiqueta, porque eso es justo lo que no puede hacer un boton. Como
 y un boton en una celda ancha se dibuja ancho. El minimo se mide desde `raw_text` solo, asi que
 depende del contenido y no del sitio que le toque.
 
-**Ojo con el primer frame.** El bucle llama a `update()` antes que a `update_layout()`, asi que
-el primer frame no tiene rect resuelto y no puede acertar ningun `is_inside`. A partir del
-segundo va bien. No es un problema del boton: es el orden del bucle.
+**Ojo con el primer frame.** El bucle llama a `update_layout()` antes que a `update()`, asi que
+cuando `update()` corre ya hay rect resuelto este frame. El hover, que se lee de `Input` en
+`update()`, acierta desde el primer frame.
 
-No hay activacion por teclado ni foco, porque el motor no tiene entrada de teclado. Un boton se
-alcanza solo con el raton.
+La activacion ("clicked") no se dispara en `update()` sino en `on_gui_input`, cuando el evento
+llega por el recorrido de entrada; asi un clic lo ve un solo control. Ademas del clic, un boton
+se activa con Enter o Espacio mientras tiene el foco (`FocusMode::CLICK` por defecto), que es lo
+que lo hace alcanzable por teclado.
 
 ## Contenedores
 
@@ -815,20 +849,18 @@ El desplazamiento horizontal no se ofrece: una barra horizontal necesita un segu
 un segundo rango, y nada en el arbol se envuelve de una forma que lo quisiera. La `x` se guarda
 tal cual sin acotar, para que quien la escriba no tenga que acordarse de que mitad esta viva.
 
-### Por que un tirador y no una rueda
+### El tirador y la rueda
 
-El motor no tiene entrada de rueda: `IOSTerminal` expone la posicion del raton y los dos botones
-y nada mas. Asi que en vez de fingir una rueda, esto expone un tirador arrastrable normal, que
-el terminal puede responder con la entrada de clic que ya tiene.
+El tirador arrastrable y la rueda son las dos entradas que tiene la vista, y ambas desembocan
+en el mismo `set_scroll_offset()`.
 
-La rueda sigue siendo la entrada mejor para una lista, y sigue faltando. Cuando llegue, desplazarse
-sera un segundo camino hacia el mismo `set_scroll_offset()` que el arrastre ya usa: sumar
-`scroll_up`/`scroll_down` al `Input` y restarlos aqui.
+El tirador se arrastra: pulsar sobre el inicia el arrastre, moverse lo sigue y soltar lo termina,
+en cualquier sitio. Como los eventos de raton llegan por el recorrido de entrada, `can_receive_input`
+acepta movimiento y soltado **mientras `dragging`** aunque el puntero ya no este sobre el tirador;
+sin esa captura, un arrastre rapido que se sale del raíl se quedaria parado.
 
-Los eventos de rueda ya llegan hoy desde el terminal y se descartan solos: en
-`LinuxTerminal.cpp`, `is_motion` se calcula como `button & 32`, y los codigos 64/65 de la rueda
-traen ese bit puesto, asi que caen fuera del `if (!is_motion)` y no hacen nada. Cuando se
-anada el soporte hay que quitar ese bit antes de mirar los botones.
+La rueda suma su delta al offset (con el signo cambiado: rueda arriba es ir hacia el principio).
+`scroll_by()` y `set_scroll_offset()` siguen ahi para moverlo por codigo.
 
 ## Integracion CMake
 

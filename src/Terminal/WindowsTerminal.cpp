@@ -104,6 +104,64 @@ void WindowsTerminal::present_buffer(const std::vector<TermChar>& buffer, Vec2 b
     }
 }
 
+Key WindowsTerminal::vk_to_key(int virtual_key) {
+    if (virtual_key >= 'A' && virtual_key <= 'Z')
+        return static_cast<Key>(static_cast<uint16_t>(Key::A) + (virtual_key - 'A'));
+    if (virtual_key >= '0' && virtual_key <= '9')
+        return static_cast<Key>(static_cast<uint16_t>(Key::DIGIT_0) + (virtual_key - '0'));
+
+    switch (virtual_key) {
+        case VK_SPACE: return Key::SPACE;
+        case VK_ESCAPE: return Key::ESCAPE;
+        case VK_TAB: return Key::TAB;
+        case VK_BACK: return Key::BACKSPACE;
+        case VK_RETURN: return Key::ENTER;
+        case VK_LEFT: return Key::LEFT;
+        case VK_RIGHT: return Key::RIGHT;
+        case VK_UP: return Key::UP;
+        case VK_DOWN: return Key::DOWN;
+        case VK_HOME: return Key::HOME;
+        case VK_END: return Key::END;
+        case VK_PRIOR: return Key::PAGE_UP;
+        case VK_NEXT: return Key::PAGE_DOWN;
+        case VK_INSERT: return Key::INSERT;
+        case VK_DELETE: return Key::DELETE;
+        case VK_SHIFT: case VK_LSHIFT: case VK_RSHIFT: return Key::SHIFT;
+        case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL: return Key::CONTROL;
+        case VK_MENU: case VK_LMENU: case VK_RMENU: return Key::ALT;
+        case VK_LWIN: case VK_RWIN: return Key::SUPER;
+        case VK_F1: return Key::F1;
+        case VK_F2: return Key::F2;
+        case VK_F3: return Key::F3;
+        case VK_F4: return Key::F4;
+        case VK_F5: return Key::F5;
+        case VK_F6: return Key::F6;
+        case VK_F7: return Key::F7;
+        case VK_F8: return Key::F8;
+        case VK_F9: return Key::F9;
+        case VK_F10: return Key::F10;
+        case VK_F11: return Key::F11;
+        case VK_F12: return Key::F12;
+        default: return Key::UNKNOWN;
+    }
+}
+
+void WindowsTerminal::emit_key(Key key, bool pressed, char32_t text, bool ctrl,
+                               bool shift, bool alt) {
+    InputEvent event;
+    event.type = InputEvent::Type::KEY;
+    event.key = key;
+    event.pressed = pressed;
+    event.text = text;
+    event.ctrl = ctrl;
+    event.shift = shift;
+    event.alt = alt;
+    event.mouse_pos = mouse_pos;
+    input_events.push_back(event);
+
+    if (pressed && key != Key::NONE) keys_pressed.push_back(key);
+}
+
 void WindowsTerminal::poll_events() {
     l_click_prev = l_click;
     r_click_prev = r_click;
@@ -114,29 +172,104 @@ void WindowsTerminal::poll_events() {
     l_click_just_pressed = (l_click && !l_click_prev);
     r_click_just_pressed = (r_click && !r_click_prev);
 
+    keys_pressed.clear();
+    wheel_delta = 0;
+
     const int EVENT_COUNT = 128;
     INPUT_RECORD input_buffer[EVENT_COUNT];
     DWORD events_read = 0;
     DWORD events_available = 0;
 
     GetNumberOfConsoleInputEvents(hStdin, &events_available);
-    if (events_available > 0) {
-        if (!ReadConsoleInput(hStdin, input_buffer, EVENT_COUNT, &events_read)) return;
+    if (events_available == 0) return;
 
-        for (DWORD i = 0; i < events_read; ++i) {
-            INPUT_RECORD &rec = input_buffer[i];
-            if (rec.EventType == MOUSE_EVENT) {
-                MOUSE_EVENT_RECORD &mouse_rec = rec.Event.MouseEvent;
-                if (mouse_rec.dwEventFlags == MOUSE_MOVED) {
-                    mouse_pos = {mouse_rec.dwMousePosition.X, mouse_rec.dwMousePosition.Y};
+    if (!ReadConsoleInput(hStdin, input_buffer, EVENT_COUNT, &events_read)) return;
+
+    for (DWORD i = 0; i < events_read; ++i) {
+        INPUT_RECORD& rec = input_buffer[i];
+
+        if (rec.EventType == KEY_EVENT) {
+            const KEY_EVENT_RECORD& key_rec = rec.Event.KeyEvent;
+
+            // The console reports a key once per character typed, so a repeat
+            // arrives as repeated presses; dropping them would make holding a
+            // key type once.
+            if (key_rec.wRepeatCount > 0) {
+                for (WORD r = 0; r < key_rec.wRepeatCount; ++r) {
+                    emit_key(
+                        vk_to_key(key_rec.wVirtualKeyCode),
+                        key_rec.bKeyDown != FALSE,
+                        static_cast<char32_t>(key_rec.uChar.UnicodeChar),
+                        (key_rec.dwControlKeyState &
+                         (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0,
+                        (key_rec.dwControlKeyState & SHIFT_PRESSED) != 0,
+                        (key_rec.dwControlKeyState &
+                         (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0);
                 }
             }
-        }
-        if (events_available > events_read) {
-            FlushConsoleInputBuffer(hStdin);
+        } else if (rec.EventType == MOUSE_EVENT) {
+            const MOUSE_EVENT_RECORD& mouse_rec = rec.Event.MouseEvent;
+            mouse_pos = {mouse_rec.dwMousePosition.X, mouse_rec.dwMousePosition.Y};
+
+            if (mouse_rec.dwEventFlags == MOUSE_WHEELED) {
+                // Signed, and in 120ths of a notch. Positive is up.
+                const int notches = GET_WHEEL_DELTA_WPARAM(mouse_rec.dwButtonState) / 120;
+                if (notches != 0) {
+                    wheel_delta += notches;
+                    InputEvent event;
+                    event.type = InputEvent::Type::MOUSE_WHEEL;
+                    event.wheel_delta = notches;
+                    event.mouse_pos = mouse_pos;
+                    input_events.push_back(event);
+                }
+            } else if (mouse_rec.dwEventFlags == MOUSE_MOVED) {
+                InputEvent event;
+                event.type = InputEvent::Type::MOUSE_MOTION;
+                event.mouse_pos = mouse_pos;
+                input_events.push_back(event);
+            } else if (mouse_rec.dwEventFlags == 0) {
+                // A button press or release. On a release the bit is already
+                // cleared in dwButtonState, so which button cannot be told from
+                // the record; the left button is reported, which is the common
+                // case. Release still carries pressed=false, which is what a drag
+                // listens for.
+                InputEvent event;
+                event.type = InputEvent::Type::MOUSE_BUTTON;
+                event.mouse_pos = mouse_pos;
+                if (mouse_rec.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED) {
+                    event.mouse_button = MouseButton::LEFT;
+                    event.pressed = true;
+                } else if (mouse_rec.dwButtonState & RIGHTMOST_BUTTON_PRESSED) {
+                    event.mouse_button = MouseButton::RIGHT;
+                    event.pressed = true;
+                } else {
+                    event.mouse_button = MouseButton::LEFT;
+                    event.pressed = false;
+                }
+                input_events.push_back(event);
+            }
         }
     }
+
+    if (events_available > events_read) {
+        FlushConsoleInputBuffer(hStdin);
+    }
 }
+
+std::vector<InputEvent> WindowsTerminal::take_input_events() {
+    std::vector<InputEvent> drained;
+    drained.swap(input_events);
+    return drained;
+}
+
+bool WindowsTerminal::was_key_pressed(Key key) const {
+    for (Key pressed : keys_pressed) {
+        if (pressed == key) return true;
+    }
+    return false;
+}
+
+int WindowsTerminal::get_wheel_delta() const { return wheel_delta; }
 
 Vec2 WindowsTerminal::get_mouse_position() const { return mouse_pos; }
 bool WindowsTerminal::is_left_click_pressed() const { return l_click; }

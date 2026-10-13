@@ -18,7 +18,10 @@
 #endif
 
 #include <guayaba/Core/Color.hpp>
+#include <guayaba/Core/Focus.hpp>
 #include <guayaba/Core/Input.hpp>
+#include <guayaba/Core/InputEvent.hpp>
+#include <guayaba/Core/Key.hpp>
 #include <guayaba/Core/NodeRef.hpp>
 #include <guayaba/Core/NodeRegistry.hpp>
 #include <guayaba/Core/Script.hpp>

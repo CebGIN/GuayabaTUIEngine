@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <guayaba/Core/InputEvent.hpp>
 #include <guayaba/Core/NodeRegistry.hpp>
 #include <guayaba/Core/Rect.hpp>
 #include <guayaba/Core/Signal.hpp>
@@ -187,6 +188,27 @@ public:
     // rect - see Control::update_layout, which is why there is only one virtual
     // here and no separate propagate step.
     virtual void update_layout(const Rect& parent_rect);
+
+    /*
+        Hands this subtree the frame's input events, for controls to consume.
+
+        The base visits children in REVERSE order (a later sibling draws on top,
+        so it gets first refusal), then offers what is left to this node's script
+        via on_input. A control overrides this to add its own hover/focus handling
+        before the script gets a turn. Consuming an event means erasing it from
+        the vector, so the same press cannot reach two controls.
+
+        The frame loop calls this after update_layout, so the rects hit-tested are
+        the ones about to be drawn.
+    */
+    virtual void route_input(std::vector<InputEvent>& events);
+
+    /*
+        Delivers one event nobody consumed to this subtree. The base recurses in
+        forward order and calls this node's script on_unhandled_input. Not
+        consumable: by the time an event gets here, every control has declined it.
+    */
+    virtual void route_unhandled_input(const InputEvent& event);
 
     template<typename S, typename... Args>
     ScriptRef<typename S::node_type, S> attach_script(Args&&... args);

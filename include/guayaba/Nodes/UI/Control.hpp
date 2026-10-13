@@ -3,6 +3,7 @@
 
 #include <string>
 
+#include <guayaba/Core/InputEvent.hpp>
 #include <guayaba/Core/Rect.hpp>
 #include <guayaba/Core/Vec2.hpp>
 #include <guayaba/Nodes/Node.hpp>
@@ -10,6 +11,8 @@
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
 
 namespace guayaba {
+
+class FocusManager;
 
 /*
     Base class for nodes that lay themselves out.
@@ -59,6 +62,21 @@ enum class Grow {
 };
 
 class Control : public Node2D {
+public:
+    /*
+        Whether and how this control takes the keyboard focus.
+
+        NONE  never focuses, and Tab skips it.
+        CLICK focuses when clicked, and Tab reaches it.
+        ALL   focuses on click and on Tab, and keeps focus while the pointer is
+              over it.
+    */
+    enum class FocusMode {
+        NONE,
+        CLICK,
+        ALL,
+    };
+
 protected:
     // Continuous anchors: 0.0 is the start edge of the parent rect, 1.0 the end.
     float anchor_left = 0.0f;
@@ -95,6 +113,45 @@ public:
     void draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     void invalidate_cache_recursively() override;
+
+    // --- Input ----------------------------------------------------------------
+
+    /*
+        Children in reverse (topmost first), then this control over what is left.
+        An event this control receives is removed from the vector, which is what
+        stops it reaching the controls behind. Node::route_input is deliberately
+        not called: its forward child walk has just been done in reverse.
+    */
+    void route_input(std::vector<InputEvent>& events) override;
+
+    /*
+        Whether this control is a candidate for the event: a mouse event when the
+        pointer is over it, a key when it holds the focus. A subclass that takes
+        input outside its rect (a captured drag) overrides this.
+    */
+    virtual bool can_receive_input(const InputEvent& event) const;
+
+    /*
+        Entry point for one event already routed here. Decides who the event is
+        for, announces it on the "gui_input" signal, then hands it to
+        on_gui_input. Returns whether on_gui_input consumed it.
+    */
+    bool handle_input(const InputEvent& event);
+
+    // --- Focus ----------------------------------------------------------------
+
+    void set_focus_mode(FocusMode mode) { focus_mode = mode; }
+    FocusMode get_focus_mode() const { return focus_mode; }
+
+    // True when this control holds the focus.
+    bool is_focused() const { return focused; }
+
+    // Takes the focus, emitting focus_exited on the previous holder and
+    // focus_entered here. Does nothing when the mode is NONE or it already has it.
+    void grab_focus();
+
+    // Gives the focus up, emitting focus_exited here if it was held.
+    void release_focus();
 
     // --- Anchors -------------------------------------------------------------
 
@@ -144,6 +201,28 @@ public:
     void set_clip_children(bool enabled);
 
     Rect get_child_clip(const Rect& incoming_clip) const;
+
+protected:
+    /*
+        What this control does with an event that reached it. Returns true when it
+        consumed the event, which is what stops it going to the controls behind.
+        The default returns false: a control with no behaviour of its own observes
+        and does not swallow.
+    */
+    virtual bool on_gui_input(const InputEvent& event);
+
+private:
+    FocusMode focus_mode = FocusMode::NONE;
+
+    // Whether this control holds the focus. Focus itself lives in FocusManager,
+    // process-wide; this is only the flag is_focused() answers without asking.
+    bool focused = false;
+
+    // Called by FocusManager on a focus change, so the control restyles and emits
+    // focus_entered / focus_exited. Not the route a scene takes.
+    void set_focused_internal(bool now_focused);
+
+    friend class FocusManager;
 };
 
 } // namespace guayaba

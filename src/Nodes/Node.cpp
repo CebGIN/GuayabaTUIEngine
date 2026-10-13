@@ -367,6 +367,46 @@ void Node::update_layout(const Rect& parent_rect) {
     for_each_child([&parent_rect](Node* child) { child->update_layout(parent_rect); });
 }
 
+void Node::route_input(std::vector<InputEvent>& events) {
+    // Same guard as update(): a child that handles an event is free to free
+    // itself, and the walk still holds a pointer to it.
+    const uint64_t my_id = instance_id_;
+    if (!detail::NodeRegistry::instance().is_live(my_id)) return;
+
+    // Children in reverse: draw order is child order, so a later sibling draws on
+    // top and must get first refusal. The count is taken once; a child that frees
+    // itself leaves a slot the bounds check skips rather than a stale index.
+    for (size_t i = children.size(); i > 0; --i) {
+        if (i - 1 >= children.size()) continue;
+        children[i - 1]->route_input(events);
+
+        if (!detail::NodeRegistry::instance().is_live(my_id)) return;
+        if (events.empty()) return;
+    }
+
+    // This node's own turn, for whatever the children left. Only a script can act
+    // here; a plain Node has no idea what a key means.
+    if (script) {
+        for (size_t i = 0; i < events.size();) {
+            if (script->on_input(events[i])) {
+                events.erase(events.begin() + static_cast<std::ptrdiff_t>(i));
+                // Do not advance: the next event shifted into this slot.
+            } else {
+                ++i;
+            }
+        }
+    }
+}
+
+void Node::route_unhandled_input(const InputEvent& event) {
+    if (script) script->on_unhandled_input(event);
+
+    const uint64_t my_id = instance_id_;
+    if (!detail::NodeRegistry::instance().is_live(my_id)) return;
+
+    for_each_child([&event](Node* child) { child->route_unhandled_input(event); });
+}
+
 void Node::draw(ConsoleRenderer& renderer, const Rect& clip) {
     // Traversal is only the children: a script has no drawing hook, so nothing
     // here calls user code that could free this node mid-frame. for_each_child

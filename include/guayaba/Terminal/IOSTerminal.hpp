@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <guayaba/Core/InputEvent.hpp>
+#include <guayaba/Core/Key.hpp>
 #include <guayaba/Core/TermChar.hpp>
 #include <guayaba/Core/Vec2.hpp>
 
@@ -36,6 +38,29 @@ public:
     virtual bool is_right_click_pressed() const = 0;
     virtual bool is_left_click_just_pressed() const = 0;
     virtual bool is_right_click_just_pressed() const = 0;
+
+    /*
+        Everything that happened since the last call, oldest first, and empty on
+        the frame after. Implemented by each backend as a swap: the caller gets
+        the accumulated vector and the terminal keeps an empty one, so an event
+        is delivered exactly once no matter how many readers ask.
+
+        Ordering follows the order the bytes arrived, which is the order the user
+        did things.
+    */
+    virtual std::vector<InputEvent> take_input_events() = 0;
+
+    /*
+        Whether a key went down during the last poll. A terminal reports presses
+        and never releases, so there is no held state to answer with; this is the
+        same question per frame, answered from a set the backend keeps so it
+        survives the drain of take_input_events().
+    */
+    virtual bool was_key_pressed(Key key) const = 0;
+
+    // Notches scrolled during the last poll. Positive is up, negative down, and
+    // several notches in one read arrive summed. Reset every poll.
+    virtual int get_wheel_delta() const = 0;
 
     // Blocking text input
     virtual std::string get_line_input(Vec2 position) = 0;

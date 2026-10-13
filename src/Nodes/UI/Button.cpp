@@ -13,19 +13,37 @@ Button::Button(const std::string& node_name, Vec2 node_position)
     // Declared here rather than on demand at the emit, so connect_signal finds
     // it and so is the one signal a Button is known to have.
     declare_signal("clicked");
+
+    // Reachable by keyboard: clicking focuses it, and Tab reaches it.
+    set_focus_mode(FocusMode::CLICK);
 }
 
 void Button::update(double delta_time) {
-    // Tested against the rect resolved last frame, which is also the rect this
-    // frame draws: layout runs between update() and draw(), so reading the
-    // freshest one here would mean hit-testing a size the user has not seen yet.
+    // Hover is polled, not event-driven: the pointer leaving this Button does not
+    // send it an event (events go to whatever is under the pointer), so the state
+    // has to be read from Input to clear. Activation is the routed part, in
+    // on_gui_input.
     hovered = is_inside(Input::mouse_pos);
 
-    if (!disabled && hovered && Input::l_click_just_pressed) {
-        emit_signal("clicked");
+    Control::update(delta_time);
+}
+
+bool Button::on_gui_input(const InputEvent& event) {
+    if (disabled) return false;
+
+    if (event.type == InputEvent::Type::MOUSE_BUTTON) {
+        if (event.pressed && event.mouse_button == MouseButton::LEFT) {
+            emit_signal("clicked");
+            return true;
+        }
+    } else if (event.type == InputEvent::Type::KEY) {
+        if (event.pressed && (event.key == Key::ENTER || event.key == Key::SPACE)) {
+            emit_signal("clicked");
+            return true;
+        }
     }
 
-    Control::update(delta_time);
+    return false;
 }
 
 ButtonState Button::current_state() const {

@@ -1,4 +1,5 @@
 #include <iostream>
+#include <utility>
 
 #include <guayaba/Core/Input.hpp>
 #include <guayaba/Core/SignalBus.hpp>
@@ -28,10 +29,19 @@ namespace {
 Vec2 previous_mouse_pos = {0, 0};
 bool has_previous_mouse = false;
 
+// This frame's events, waiting to be drained. Held here rather than taken
+// straight from the terminal so refresh_input can emit "input" for each of them
+// before the tree walk gets a chance to consume one.
+std::vector<InputEvent> frame_events;
+
 } // namespace
 
 void refresh_input() {
-    if (!g_terminal) return;
+    if (!g_terminal) {
+        frame_events.clear();
+        return;
+    }
+
     g_terminal->poll_events();
 
     l_click_prev = l_click;
@@ -44,6 +54,10 @@ void refresh_input() {
     r_click_just_pressed = g_terminal->is_right_click_just_pressed();
 
     mouse_pos = g_terminal->get_mouse_position();
+
+    // Taken from the terminal before anything can react, so a reactor that drains
+    // gets the same frame's events the tree walk will.
+    frame_events = g_terminal->take_input_events();
 
     // Emitted from here, which the frame loop already calls before process_scene():
     // a reactor therefore sees the click in the same frame the scripts update in.
@@ -77,6 +91,24 @@ void refresh_input() {
     }
     previous_mouse_pos = mouse_pos;
     has_previous_mouse = true;
+
+    // Every event, not just the summary the two signals above provide. Emitted
+    // before routing so an observer sees the same ordering the controls will, and
+    // so a reactor cannot starve a control of an event - this loop holds its own
+    // copy of each event.
+    if (bus.is_declared("input")) {
+        for (const InputEvent& event : frame_events) {
+            bus.emit_signal("input", event);
+        }
+    }
+}
+
+std::vector<InputEvent> drain_input_events() {
+    // Moved out rather than copied: the caller gets this frame's events and this
+    // namespace keeps an empty vector, so two drains cannot both act on one click.
+    std::vector<InputEvent> drained;
+    drained.swap(frame_events);
+    return drained;
 }
 
 std::string get_line_input(Vec2 position) {

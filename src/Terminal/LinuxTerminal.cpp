@@ -9,6 +9,8 @@
 #include <cstring>
 #include <sstream>
 
+#include "KeySequence.hpp"
+
 namespace guayaba {
 
 // Map color ID (0-15) to ANSI foreground code (30-37, 90-97)
@@ -87,16 +89,183 @@ bool LinuxTerminal::parse_sgr_mouse(const char* buf, int len) {
 
     int base_button = button & 0x03; // Bottom 2 bits = button
     bool is_motion = (button & 32) != 0;
+    // The wheel is bits 6/7 with no press/release distinction, so it cannot go
+    // through the press/release path below.
+    bool is_wheel = (button & 64) != 0;
+
+    if (is_wheel) {
+        // Bit 0 says which way: 64 is up, 65 is down. A notch is an occurrence,
+        // not a state, so it gets its own event type.
+        const int delta = (button & 1) != 0 ? -1 : 1;
+        wheel_delta += delta;
+
+        InputEvent event;
+        event.type = InputEvent::Type::MOUSE_WHEEL;
+        event.wheel_delta = delta;
+        event.mouse_pos = mouse_pos;
+        event.ctrl = ctrl_held;
+        event.shift = shift_held;
+        event.alt = alt_held;
+        input_events.push_back(event);
+        return true;
+    }
 
     if (!is_motion) {
         if (base_button == 0) { // Left button
             l_click = !is_release;
+            emit_mouse_button(MouseButton::LEFT, !is_release);
         } else if (base_button == 2) { // Right button
             r_click = !is_release;
+            emit_mouse_button(MouseButton::RIGHT, !is_release);
         }
+    } else {
+        emit_mouse_motion();
     }
 
     return true;
+}
+
+void LinuxTerminal::emit_key(Key key, bool pressed, char32_t text, bool ctrl,
+                             bool shift, bool alt) {
+    InputEvent event;
+    event.type = InputEvent::Type::KEY;
+    event.key = key;
+    event.pressed = pressed;
+    event.text = text;
+    event.ctrl = ctrl;
+    event.shift = shift;
+    event.alt = alt;
+    event.mouse_pos = mouse_pos;
+    input_events.push_back(event);
+
+    if (pressed && key != Key::NONE) keys_pressed.push_back(key);
+    if (key == Key::SHIFT) shift_held = pressed;
+    if (key == Key::CONTROL) ctrl_held = pressed;
+    if (key == Key::ALT) alt_held = pressed;
+}
+
+void LinuxTerminal::emit_mouse_button(MouseButton button, bool pressed) {
+    InputEvent event;
+    event.type = InputEvent::Type::MOUSE_BUTTON;
+    event.mouse_button = button;
+    event.pressed = pressed;
+    event.shift = shift_held;
+    event.ctrl = ctrl_held;
+    event.alt = alt_held;
+    event.mouse_pos = mouse_pos;
+    input_events.push_back(event);
+}
+
+void LinuxTerminal::emit_mouse_motion() {
+    InputEvent event;
+    event.type = InputEvent::Type::MOUSE_MOTION;
+    event.pressed = false;
+    event.shift = shift_held;
+    event.ctrl = ctrl_held;
+    event.alt = alt_held;
+    event.mouse_pos = mouse_pos;
+    input_events.push_back(event);
+}
+
+std::size_t LinuxTerminal::consume_input_bytes() {
+    std::size_t index = 0;
+
+    while (index < pending_bytes.size()) {
+        const unsigned char byte = static_cast<unsigned char>(pending_bytes[index]);
+
+        // --- A sequence, or the start of one ---------------------------------
+        if (byte == '\x1b') {
+            const std::string rest = pending_bytes.substr(index);
+
+            if (rest.size() == 1) {
+                // A lone ESC at the end of the read is ambiguous; leave it
+                // pending and let poll_events decide next poll.
+                return index;
+            }
+
+            // SGR mouse report, handled before the key tables because it also
+            // starts with ESC [ and would otherwise look like a partial CSI.
+            if (rest.size() >= 3 && rest[1] == '[' && rest[2] == '<') {
+                std::size_t end = 3;
+                while (end < rest.size() && rest[end] != 'M' && rest[end] != 'm') ++end;
+                if (end >= rest.size()) return index;  // incomplete, wait
+
+                parse_sgr_mouse(rest.c_str(), static_cast<int>(end + 1));
+                index += end + 1;
+                continue;
+            }
+
+            Key key = Key::UNKNOWN;
+            bool shift = false, alt = false, ctrl = false;
+            const std::size_t used = keyseq::match_escape(rest, key, shift, alt, ctrl);
+            if (used == 0) {
+                // A complete CSI/SS3 sequence we do not map: drop it whole rather
+                // than re-parse its bytes as keys.
+                const std::size_t unknown = keyseq::unknown_sequence_length(rest);
+                if (unknown > 0) {
+                    index += unknown;
+                    continue;
+                }
+                // An incomplete sequence of a shape we recognise: wait for the
+                // rest rather than guessing.
+                const bool sequence_start =
+                    rest.size() >= 2 && (rest[1] == '[' || rest[1] == 'O');
+                if (sequence_start) return index;
+
+                // Otherwise the ESC was the Escape key and the next byte (if any)
+                // is its own key - which is what Alt+letter looks like on the
+                // wire. Emitting it now avoids stalling on a 2-byte tail forever.
+                emit_key(Key::ESCAPE, true, 0, false, false, false);
+                ++index;
+                continue;
+            }
+
+            // A terminal cannot report a key release, so a named key is a press.
+            emit_key(key, true, 0, ctrl, shift, alt);
+            index += used;
+            continue;
+        }
+
+        // --- Control codes ----------------------------------------------------
+        // These are what a terminal sends for ctrl+letter and the editing keys,
+        // so each is a named key rather than a character to insert.
+        Key control_key = Key::NONE;
+        bool is_ctrl_letter = false;
+        switch (byte) {
+            case 0x09: control_key = Key::TAB; break;
+            case 0x0D: control_key = Key::ENTER; break;
+            case 0x0A: control_key = Key::ENTER; break;
+            case 0x7F: control_key = Key::BACKSPACE; break;
+            case 0x08: control_key = Key::BACKSPACE; break;
+            default:
+                // 0x01..0x1A are Ctrl+A..Ctrl+Z; 0x00 is Ctrl+Space.
+                if (byte >= 0x01 && byte <= 0x1A) {
+                    control_key = static_cast<Key>(static_cast<uint16_t>(Key::A) + (byte - 1));
+                    is_ctrl_letter = true;
+                } else if (byte == 0x00) {
+                    control_key = Key::SPACE;
+                    is_ctrl_letter = true;
+                }
+                break;
+        }
+        if (control_key != Key::NONE) {
+            emit_key(control_key, true, 0, is_ctrl_letter, false, false);
+            ++index;
+            continue;
+        }
+
+        // --- Printable --------------------------------------------------------
+        char32_t codepoint = 0;
+        const std::size_t length = keyseq::decode_utf8(pending_bytes, index, codepoint);
+        if (length == 0) return index;  // incomplete multibyte, wait for the rest
+
+        const Key key = keyseq::key_from_ascii(byte);
+        emit_key(key == Key::NONE ? Key::UNKNOWN : key, true, codepoint, false,
+                 false, false);
+        index += length;
+    }
+
+    return index;
 }
 
 void LinuxTerminal::init() {
@@ -209,33 +378,51 @@ void LinuxTerminal::present_buffer(const std::vector<TermChar>& buffer, Vec2 buf
 void LinuxTerminal::poll_events() {
     l_click_prev = l_click;
     r_click_prev = r_click;
+    // Per-poll, so a key press or wheel notch belongs to exactly one frame.
+    keys_pressed.clear();
+    wheel_delta = 0;
 
     // Read available bytes from stdin (non-blocking)
     char buf[256];
-    int n = read(STDIN_FILENO, buf, sizeof(buf));
+    const int n = read(STDIN_FILENO, buf, sizeof(buf));
+    if (n > 0) pending_bytes.append(buf, static_cast<std::size_t>(n));
 
-    if (n > 0) {
-        int i = 0;
-        while (i < n) {
-            // Look for ESC [ < (SGR mouse sequence)
-            if (i + 2 < n && buf[i] == '\x1b' && buf[i+1] == '[' && buf[i+2] == '<') {
-                // Find end of SGR sequence (M or m)
-                int start = i;
-                i += 3;
-                while (i < n && buf[i] != 'M' && buf[i] != 'm') i++;
-                if (i < n) {
-                    i++; // Skip M/m
-                    parse_sgr_mouse(buf + start, i - start);
-                }
-            } else {
-                i++; // Skip unknown byte
-            }
+    // A lone ESC that outlived one poll was the Escape key all along; the
+    // sequence it might have started never arrived.
+    if (pending_bytes == "\x1b") {
+        if (esc_waiting) {
+            emit_key(Key::ESCAPE, true, 0, false, false, false);
+            pending_bytes.clear();
+            esc_waiting = false;
+        } else {
+            esc_waiting = true;
         }
+    } else {
+        esc_waiting = false;
+        const std::size_t used = consume_input_bytes();
+        pending_bytes.erase(0, used);
     }
 
     l_click_just_pressed = (l_click && !l_click_prev);
     r_click_just_pressed = (r_click && !r_click_prev);
 }
+
+std::vector<InputEvent> LinuxTerminal::take_input_events() {
+    // Swapped rather than copied: the terminal keeps an empty vector, so an
+    // event reaches exactly one drain.
+    std::vector<InputEvent> drained;
+    drained.swap(input_events);
+    return drained;
+}
+
+bool LinuxTerminal::was_key_pressed(Key key) const {
+    for (Key pressed : keys_pressed) {
+        if (pressed == key) return true;
+    }
+    return false;
+}
+
+int LinuxTerminal::get_wheel_delta() const { return wheel_delta; }
 
 Vec2 LinuxTerminal::get_mouse_position() const { return mouse_pos; }
 bool LinuxTerminal::is_left_click_pressed() const { return l_click; }
@@ -265,6 +452,10 @@ std::string LinuxTerminal::get_line_input(Vec2 position) {
     // Re-enable raw mode and mouse tracking
     enable_raw_mode();
     enable_mouse_tracking();
+
+    // Whatever was buffered as raw bytes while the line was typed is not input
+    // the caller wants: it is the same line echoed a second time.
+    pending_bytes.clear();
 
     return input;
 }
