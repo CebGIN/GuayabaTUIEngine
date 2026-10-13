@@ -31,6 +31,16 @@ int main() {
 
 `start_running()` no devuelve hasta que alguien llama a `SceneManager::get_instance().stop_running()`.
 
+El bucle no tiene tope de frames por defecto: corre tan rapido como la maquina pueda. Para
+una escena que cambia cada cierto tiempo, eso es quemar un nucleo redibujando el mismo frame,
+asi que `set_target_fps(n)` (0 = sin tope) hace que el bucle duerma lo que sobra del
+presupuesto de cada frame. Se pone antes de `start_running()`:
+
+```cpp
+SceneManager::get_instance().set_target_fps(30);
+SceneManager::get_instance().start_running();
+```
+
 Patron recomendado:
 - Crear funciones que se encargan de construir las escenas.
 - Las funciones devuelven `std::unique_ptr<Node>`: la funcion es la duena del nodo

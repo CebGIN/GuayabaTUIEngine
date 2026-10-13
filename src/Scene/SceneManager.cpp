@@ -7,6 +7,9 @@
 #include <guayaba/Scene/SceneManager.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
 
+#include <chrono>
+#include <thread>
+
 #include "../Core/DeletionQueue.hpp"
 
 namespace guayaba {
@@ -75,6 +78,10 @@ void SceneManager::start_running() {
 
     while (this->is_running) {
 
+        // Taken once per frame so the budget at the bottom is measured against
+        // the whole frame, and from the same clock the delta uses.
+        const auto frame_start = std::chrono::steady_clock::now();
+
         //Cambio de escena
         if (next_scene){
             // Before exit_tree, so a control still exists to hear focus_exited.
@@ -142,6 +149,24 @@ void SceneManager::start_running() {
             renderer.present();
             increase_frame_count();
         }
+
+        /*
+            Spend whatever is left of the frame's budget waiting rather than
+            starting the next one straight away. Placed after present() so the
+            terminal has just been written to and is about to have time to be
+            read, which stops the writer outrunning the reader.
+
+            Only when there is time to spare: a frame that overran its budget
+            gets none of this, so one slow frame does not push every later one
+            further behind and turn a hiccup into permanent lag.
+        */
+        if (target_fps > 0 && this->is_running && this->root_node) {
+            using clock = std::chrono::steady_clock;
+            const auto spent = std::chrono::duration_cast<std::chrono::microseconds>(
+                clock::now() - frame_start);
+            const auto budget = std::chrono::microseconds(1000000 / target_fps);
+            if (spent < budget) std::this_thread::sleep_for(budget - spent);
+        }
     }
 
     // Teardown: dropping the root can itself queue deletions from destructors,
@@ -158,6 +183,14 @@ void SceneManager::start_running() {
 
 void SceneManager::stop_running() {
     this->is_running = false;
+}
+
+void SceneManager::set_target_fps(int fps) {
+    this->target_fps = fps > 0 ? fps : 0;
+}
+
+int SceneManager::get_target_fps() const {
+    return this->target_fps;
 }
 
 unsigned long int SceneManager::get_frame_count() const{
