@@ -115,4 +115,13 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(input_routing tests/input_routing.cpp)
     target_link_libraries(input_routing PRIVATE GuayabaTUIEngine)
+
+    add_executable(line_edit tests/line_edit.cpp)
+    target_link_libraries(line_edit PRIVATE GuayabaTUIEngine)
+
+    add_executable(graph tests/graph.cpp)
+    target_link_libraries(graph PRIVATE GuayabaTUIEngine)
+
+    add_executable(listview tests/listview.cpp)
+    target_link_libraries(listview PRIVATE GuayabaTUIEngine)
 endif()

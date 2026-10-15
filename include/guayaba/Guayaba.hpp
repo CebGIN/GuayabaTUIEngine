@@ -37,8 +37,11 @@
 #include <guayaba/Nodes/UI/Button.hpp>
 #include <guayaba/Nodes/UI/Control.hpp>
 #include <guayaba/Nodes/UI/Container.hpp>
+#include <guayaba/Nodes/UI/Graph.hpp>
 #include <guayaba/Nodes/UI/HBox.hpp>
 #include <guayaba/Nodes/UI/Label.hpp>
+#include <guayaba/Nodes/UI/LineEdit.hpp>
+#include <guayaba/Nodes/UI/ListView.hpp>
 #include <guayaba/Nodes/UI/PanelContainer.hpp>
 #include <guayaba/Nodes/UI/ScrollView.hpp>
 #include <guayaba/Nodes/UI/VBox.hpp>
