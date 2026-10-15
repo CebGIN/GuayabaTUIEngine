@@ -11,9 +11,10 @@ namespace guayaba {
 // Word-wraps `text` into lines of at most `max_width` cells.
 //
 // This is pure string logic and deliberately knows nothing about the renderer,
-// about layout, or about what a "cell" is: on a monospace grid a character's
-// width is 1, so measuring is just string length. That keeps wrapping testable
-// on its own and keeps the renderer free of text semantics.
+// about layout, or about what a "cell" is beyond its width: on a monospace grid
+// a codepoint's width is 1 cell, so measuring is counting codepoints (UTF-8
+// aware), not bytes. That keeps wrapping testable on its own and keeps the
+// renderer free of text semantics.
 //
 // '\n' is a hard break, so a paragraph structure in the source text survives.
 // A word longer than max_width is NOT split - it is emitted whole and overflows

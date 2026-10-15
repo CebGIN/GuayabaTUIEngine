@@ -3,57 +3,10 @@
 
 #include <guayaba/Core/Color.hpp>
 #include <guayaba/Core/InputEvent.hpp>
+#include <guayaba/Core/Utf8.hpp>
 #include <guayaba/Nodes/UI/ListView.hpp>
 
 namespace guayaba {
-
-namespace {
-
-// One UTF-8 codepoint at byte `index`, with the number of bytes it spans. A
-// truncated or malformed sequence is reported as a single byte so a bad row still
-// renders instead of derailing the rest of the line.
-//
-// This mirrors LineEdit's private decoder: the caret there needs to walk the same
-// boundaries. It is repeated rather than shared because the two controls are in
-// separate translation units and the helper is small; a row is drawn per cell, so
-// the bytes must be turned into codepoints here rather than handed to put_text,
-// which writes one byte per cell.
-std::size_t decode_utf8(const std::string& value, std::size_t index, char32_t& codepoint) {
-    const unsigned char lead = static_cast<unsigned char>(value[index]);
-
-    std::size_t length = 1;
-    if ((lead & 0xE0) == 0xC0) {
-        length = 2;
-    } else if ((lead & 0xF0) == 0xE0) {
-        length = 3;
-    } else if ((lead & 0xF8) == 0xF0) {
-        length = 4;
-    }
-
-    if (index + length > value.size()) {
-        codepoint = lead;
-        return 1;
-    }
-
-    char32_t decoded = (length == 1) ? lead
-                     : (length == 2) ? (lead & 0x1F)
-                     : (length == 3) ? (lead & 0x0F)
-                                     : (lead & 0x07);
-    for (std::size_t i = 1; i < length; ++i) {
-        const unsigned char continuation =
-            static_cast<unsigned char>(value[index + i]);
-        if ((continuation & 0xC0) != 0x80) {
-            codepoint = lead;  // malformed: emit the lead alone
-            return 1;
-        }
-        decoded = (decoded << 6) | (continuation & 0x3F);
-    }
-
-    codepoint = decoded;
-    return length;
-}
-
-} // namespace
 
 ListView::ListView(const std::string& node_name, Vec2 node_position)
     : Control(node_name, node_position) {

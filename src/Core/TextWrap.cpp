@@ -2,6 +2,7 @@
 #include <limits>
 
 #include <guayaba/Core/TextWrap.hpp>
+#include <guayaba/Core/Utf8.hpp>
 
 namespace guayaba {
 
@@ -34,8 +35,8 @@ void wrap_paragraph(const std::string& text, int max_width, std::vector<std::str
         }
 
         const std::string word = text.substr(pos, word_end - pos);
-        const int width = static_cast<int>(out.back().size());
-        const int needed = width + (width > 0 ? 1 : 0) + static_cast<int>(word.size());
+        const int width = text_width(out.back());
+        const int needed = width + (width > 0 ? 1 : 0) + text_width(word);
 
         // A word wider than max_width is deliberately NOT split: it goes out
         // whole and overflows, and the caller's clip decides what survives. The
@@ -83,7 +84,7 @@ Vec2 measure_text(const std::string& text) {
 
     int longest = 0;
     for (const std::string& line : lines) {
-        longest = std::max(longest, static_cast<int>(line.size()));
+        longest = std::max(longest, text_width(line));
     }
 
     // An empty text still has a line: wrap() reports one and a node would draw

@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 
+#include <guayaba/Core/Utf8.hpp>
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
 
 #include <guayaba/Terminal/IOSTerminal.hpp>
@@ -105,12 +106,13 @@ void ConsoleRenderer::put_text(Vec2 origin, const std::vector<std::string>& line
                                uint16_t bg, const Rect& clip) {
     if (lines.empty() || clip.is_empty()) return;
 
-    // The block the text would occupy if nothing clipped it, so the visible
-    // window below is measured against the real content rather than the line
-    // count alone: trailing short lines must not widen or narrow the slice.
+    // Widths are codepoint counts, not byte counts: a multi-byte character is one
+    // cell. Measuring by bytes would reserve a cell per byte and push the rest of
+    // the line right, which is what punched holes into any line holding an
+    // accent, an arrow or a box glyph.
     int widest = 0;
     for (const std::string& line : lines) {
-        widest = std::max(widest, (int)line.size());
+        widest = std::max(widest, text_width(line));
     }
     if (widest <= 0) return;
 
@@ -122,18 +124,27 @@ void ConsoleRenderer::put_text(Vec2 origin, const std::vector<std::string>& line
     // the loop below walks only what is actually on screen.
     const int ox = visible.left() - content.left();
     const int oy = visible.top() - content.top();
+    const int last_col = ox + visible.size.x;
 
     for (int row = 0; row < visible.size.y; ++row) {
         const int line_index = oy + row;
         if (line_index >= (int)lines.size()) break;
 
         const std::string& line = lines[line_index];
-        // A short line contributes only what it has; the rest of that row's
-        // window is simply not written.
-        const int end = std::min(ox + visible.size.x, (int)line.size());
-        for (int col = ox; col < end; ++col) {
-            put_char(Vec2{content.left() + col, content.top() + line_index}, line[col], fg, bg,
-                     visible);
+        // Walk codepoints rather than bytes so one glyph is one column. Columns
+        // left of the window are still decoded (to keep the cell index aligned)
+        // but not drawn; a short line simply stops contributing.
+        std::size_t byte = 0;
+        int col = 0;
+        while (byte < line.size() && col < last_col) {
+            char32_t codepoint = 0;
+            const std::size_t length = decode_utf8(line, byte, codepoint);
+            if (col >= ox) {
+                put_char(Vec2{content.left() + col, content.top() + line_index},
+                         static_cast<wchar_t>(codepoint), fg, bg, visible);
+            }
+            byte += length;
+            ++col;
         }
     }
 }

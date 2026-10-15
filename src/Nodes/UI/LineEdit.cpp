@@ -3,6 +3,7 @@
 
 #include <guayaba/Core/Color.hpp>
 #include <guayaba/Core/InputEvent.hpp>
+#include <guayaba/Core/Utf8.hpp>
 #include <guayaba/Nodes/UI/LineEdit.hpp>
 
 namespace guayaba {
@@ -13,44 +14,6 @@ namespace {
 // test is what makes walking the string forwards and backwards agree on where the
 // codepoint boundaries are, which is what keeps the caret valid.
 bool is_continuation(unsigned char byte) { return (byte & 0xC0) == 0x80; }
-
-// How many bytes the codepoint starting at index spans, at least one. A truncated
-// or malformed sequence is reported as a single byte rather than desyncing the
-// walk: a field has to render whatever set_text was handed, and giving up on the
-// rest of the line would be worse than showing one replacement-shaped cell.
-std::size_t sequence_length(const std::string& value, std::size_t index) {
-    const unsigned char lead = static_cast<unsigned char>(value[index]);
-
-    std::size_t length = 1;
-    if ((lead & 0xE0) == 0xC0) {
-        length = 2;
-    } else if ((lead & 0xF0) == 0xE0) {
-        length = 3;
-    } else if ((lead & 0xF8) == 0xF0) {
-        length = 4;
-    }
-
-    if (index + length > value.size()) return 1;
-    for (std::size_t i = 1; i < length; ++i) {
-        if (!is_continuation(static_cast<unsigned char>(value[index + i]))) return 1;
-    }
-    return length;
-}
-
-char32_t decode_at(const std::string& value, std::size_t index, std::size_t& length) {
-    length = sequence_length(value, index);
-    const unsigned char lead = static_cast<unsigned char>(value[index]);
-    if (length == 1) return lead;
-
-    char32_t codepoint = (length == 2) ? (lead & 0x1F)
-                       : (length == 3) ? (lead & 0x0F)
-                                       : (lead & 0x07);
-    for (std::size_t i = 1; i < length; ++i) {
-        codepoint = (codepoint << 6) |
-                    (static_cast<unsigned char>(value[index + i]) & 0x3F);
-    }
-    return codepoint;
-}
 
 // The UTF-8 bytes for one codepoint. The insert path hands the result straight to
 // std::string::insert, so this is the only place bytes are built rather than read.
@@ -360,8 +323,8 @@ void LineEdit::draw(ConsoleRenderer& renderer, const Rect& clip) {
         uint16_t foreground = empty ? placeholder_color : text_color;
 
         if (byte < source.size()) {
-            std::size_t length = 0;
-            const char32_t codepoint = decode_at(source, byte, length);
+            char32_t codepoint = 0;
+            const std::size_t length = decode_utf8(source, byte, codepoint);
             // Secret mode substitutes the glyph, one per visible codepoint, so the
             // masked width still matches what was typed. The stored text is not
             // touched - get_text() still returns it.

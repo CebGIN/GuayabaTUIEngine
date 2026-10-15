@@ -124,4 +124,7 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(listview tests/listview.cpp)
     target_link_libraries(listview PRIVATE GuayabaTUIEngine)
+
+    add_executable(text_rendering tests/text_rendering.cpp)
+    target_link_libraries(text_rendering PRIVATE GuayabaTUIEngine)
 endif()
