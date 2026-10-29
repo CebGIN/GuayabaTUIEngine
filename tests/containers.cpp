@@ -182,6 +182,72 @@ void test_grid_hidden_child_is_skipped() {
     assert(hidden->get_rect().size.x == 0);
 }
 
+// --- MarginContainer --------------------------------------------------------
+
+void test_margin_layout() {
+    auto margin = std::make_unique<MarginContainer>("margin");
+    margin->set_anchor_preset(AnchorPreset::FullRect);
+    margin->set_margins(2, 1, 3, 4);
+
+    Control* child = add_cell(*margin, "child", {4, 1});
+    margin->update_layout(Rect::from_size(SCREEN));
+
+    // The child sits at the content rect's top-left: the margin's own inset.
+    assert((child->get_rect().pos == Vec2{2, 1}));
+    assert((child->get_rect().size == Vec2{4, 1}));
+
+    // Largest child minimum plus the margins.
+    assert((margin->get_minimum_size() == Vec2{9, 6}));
+}
+
+void test_margin_without_children() {
+    auto margin = std::make_unique<MarginContainer>("margin");
+    margin->set_margins(2, 1, 3, 4);
+
+    // No children: the margins themselves are the minimum.
+    assert((margin->get_minimum_size() == Vec2{5, 5}));
+}
+
+void test_margin_negative_is_clamped() {
+    auto margin = std::make_unique<MarginContainer>("margin");
+    margin->set_margins(-1, -2, -3, -4);
+
+    const EdgeSize margins = margin->get_margins();
+    assert(margins.left == 0);
+    assert(margins.top == 0);
+    assert(margins.right == 0);
+    assert(margins.bottom == 0);
+
+    add_cell(*margin, "child", {4, 1});
+    assert((margin->get_minimum_size() == Vec2{4, 1}));
+}
+
+void test_margin_non_control_child() {
+    auto margin = std::make_unique<MarginContainer>("margin");
+    margin->set_anchor_preset(AnchorPreset::FullRect);
+    margin->set_margins(1, 2, 3, 4);
+
+    add_cell(*margin, "cell", {4, 1});
+    NodeRef<Node2D> decoration = margin->add_child<Node2D>("decoration");
+
+    margin->update_layout(Rect::from_size(SCREEN));
+
+    // The decoration does not add to the minimum, but it is placed.
+    assert((margin->get_minimum_size() == Vec2{8, 7}));
+    assert((decoration->get_local_position() == Vec2{1, 2}));
+}
+
+void test_margin_hidden_child_is_skipped() {
+    auto margin = std::make_unique<MarginContainer>("margin");
+    margin->set_margins(1, 1, 1, 1);
+
+    add_cell(*margin, "shown", {4, 1});
+    Control* hidden = add_cell(*margin, "hidden", {9, 9});
+    hidden->set_visible(false);
+
+    assert((margin->get_minimum_size() == Vec2{6, 3}));
+}
+
 } // namespace
 
 int main() {
@@ -193,6 +259,12 @@ int main() {
     test_grid_only_grower_columns_absorb_slack();
     test_grid_non_control_child();
     test_grid_hidden_child_is_skipped();
+
+    test_margin_layout();
+    test_margin_without_children();
+    test_margin_negative_is_clamped();
+    test_margin_non_control_child();
+    test_margin_hidden_child_is_skipped();
 
     std::cout << "containers: all checks passed." << std::endl;
     return 0;

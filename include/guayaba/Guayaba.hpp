@@ -43,6 +43,7 @@
 #include <guayaba/Nodes/UI/Label.hpp>
 #include <guayaba/Nodes/UI/LineEdit.hpp>
 #include <guayaba/Nodes/UI/ListView.hpp>
+#include <guayaba/Nodes/UI/MarginContainer.hpp>
 #include <guayaba/Nodes/UI/PanelContainer.hpp>
 #include <guayaba/Nodes/UI/ScrollView.hpp>
 #include <guayaba/Nodes/UI/VBox.hpp>
