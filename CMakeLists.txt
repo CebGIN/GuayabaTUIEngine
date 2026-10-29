@@ -163,4 +163,7 @@ if(GUAYABA_BUILD_TESTS)
     find_package(Threads REQUIRED)
     add_executable(deferred_calls tests/deferred_calls.cpp)
     target_link_libraries(deferred_calls PRIVATE GuayabaTUIEngine Threads::Threads)
+
+    add_executable(containers tests/containers.cpp)
+    target_link_libraries(containers PRIVATE GuayabaTUIEngine)
 endif()

@@ -38,6 +38,7 @@
 #include <guayaba/Nodes/UI/Control.hpp>
 #include <guayaba/Nodes/UI/Container.hpp>
 #include <guayaba/Nodes/UI/Graph.hpp>
+#include <guayaba/Nodes/UI/GridContainer.hpp>
 #include <guayaba/Nodes/UI/HBox.hpp>
 #include <guayaba/Nodes/UI/Label.hpp>
 #include <guayaba/Nodes/UI/LineEdit.hpp>
