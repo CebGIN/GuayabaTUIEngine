@@ -166,4 +166,7 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(containers tests/containers.cpp)
     target_link_libraries(containers PRIVATE GuayabaTUIEngine)
+
+    add_executable(basic_controls tests/basic_controls.cpp)
+    target_link_libraries(basic_controls PRIVATE GuayabaTUIEngine)
 endif()
