@@ -7,6 +7,8 @@
 #include <guayaba/Core/Script.hpp>
 #include <guayaba/Nodes/UI/Control.hpp>
 
+#include "../../Core/MouseCapture.hpp"
+
 namespace guayaba {
 
 namespace {
@@ -246,7 +248,8 @@ bool Control::can_receive_input(const InputEvent& event) const {
         case InputEvent::Type::MOUSE_MOTION:
         case InputEvent::Type::MOUSE_BUTTON:
         case InputEvent::Type::MOUSE_WHEEL:
-            return is_inside(event.mouse_pos);
+            // While captured, the pointer being outside the rect is the point.
+            return has_mouse_capture() || is_inside(event.mouse_pos);
 
         case InputEvent::Type::KEY:
             // Keys go to the focused control and to nothing else.
@@ -291,6 +294,52 @@ void Control::set_focused_internal(bool now_focused) {
     if (focused == now_focused) return;
     focused = now_focused;
     emit_signal(now_focused ? "focus_entered" : "focus_exited");
+}
+
+// --- Mouse capture ----------------------------------------------------------
+
+void Control::capture_mouse() {
+    // A hidden control is not on screen to be dragged; refuse rather than keep a
+    // capture no frame would ever dispatch.
+    if (!is_visible_in_tree()) return;
+
+    detail::MouseCapture::instance().capture(this);
+}
+
+void Control::release_mouse() {
+    detail::MouseCapture::instance().release(this);
+}
+
+bool Control::has_mouse_capture() const {
+    return detail::MouseCapture::instance().get_captured() == this;
+}
+
+Control* Control::get_mouse_capture() {
+    return detail::MouseCapture::instance().get_captured();
+}
+
+void Control::route_captured_input(std::vector<InputEvent>& events) {
+    if (get_mouse_capture() == nullptr) return;
+
+    for (size_t i = 0; i < events.size();) {
+        // Resolved again every pass: the captor can be destroyed or replaced from
+        // its own on_gui_input, and the id is what keeps that safe.
+        Control* captor = get_mouse_capture();
+        if (captor == nullptr) return;
+
+        // Keyboard input is not part of the capture contract.
+        if (events[i].type == InputEvent::Type::KEY) {
+            ++i;
+            continue;
+        }
+
+        if (captor->handle_input(events[i])) {
+            events.erase(events.begin() + static_cast<std::ptrdiff_t>(i));
+            // Do not advance: the next event shifted into this slot.
+        } else {
+            ++i;
+        }
+    }
 }
 
 } // namespace guayaba

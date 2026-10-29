@@ -147,6 +147,34 @@ public:
     // Gives the focus up, emitting focus_exited here if it was held.
     void release_focus();
 
+    // --- Mouse capture --------------------------------------------------------
+
+    /*
+        Takes the mouse until release_mouse(): mouse buttons, motion and wheel are
+        offered here first, wherever the pointer is, so a drag survives leaving the
+        rect. Only one control holds it; capturing replaces the previous holder. A
+        hidden control cannot capture.
+
+        The capture is dropped automatically when the control is destroyed, hidden,
+        or the scene changes.
+    */
+    void capture_mouse();
+    void release_mouse();
+
+    // True when this control is the current captor.
+    bool has_mouse_capture() const;
+
+    // The current captor, or nullptr.
+    static Control* get_mouse_capture();
+
+    /*
+        Offers the mouse events in `events` to the captor and erases in place the
+        ones it consumes; keyboard events are left alone. The frame loop calls this
+        before routing the tree, and a test that drives route_input() by hand
+        should do the same to reproduce the contract.
+    */
+    static void route_captured_input(std::vector<InputEvent>& events);
+
     // --- Anchors -------------------------------------------------------------
 
     AnchorPreset get_anchor_preset() const;

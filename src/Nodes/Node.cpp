@@ -8,6 +8,7 @@
 #include <guayaba/Nodes/UI/Control.hpp>
 
 #include "../Core/DeletionQueue.hpp"
+#include "../Core/MouseCapture.hpp"
 
 namespace guayaba {
 
@@ -342,11 +343,16 @@ void Node::set_visible(bool visible) {
     visible_ = visible;
 
     if (!visible) {
-        // Only a focus inside the subtree that just went away is released; another
-        // control's focus is not ours to take.
+        // Only a focus or capture inside the subtree that just went away is
+        // released; another control's is not ours to take.
         Control* focused = FocusManager::get_instance().get_focused();
         if (focused != nullptr && is_ancestor_of(focused)) {
             FocusManager::get_instance().clear();
+        }
+
+        Control* captor = detail::MouseCapture::instance().get_captured();
+        if (captor != nullptr && is_ancestor_of(captor)) {
+            detail::MouseCapture::instance().clear();
         }
     }
 

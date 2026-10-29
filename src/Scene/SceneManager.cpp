@@ -3,6 +3,7 @@
 #include <guayaba/Core/Rect.hpp>
 #include <guayaba/Core/SignalBus.hpp>
 #include <guayaba/Nodes/Node.hpp>
+#include <guayaba/Nodes/UI/Control.hpp>
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
 #include <guayaba/Scene/SceneManager.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
@@ -11,6 +12,7 @@
 #include <thread>
 
 #include "../Core/DeletionQueue.hpp"
+#include "../Core/MouseCapture.hpp"
 
 namespace guayaba {
 
@@ -44,8 +46,10 @@ std::unique_ptr<Node> SceneManager::take_scene() {
 void SceneManager::apply_pending_scene() {
     if (!next_scene) return;
 
-    // Before exit_tree, so a control still exists to hear focus_exited.
+    // Before exit_tree, so a control still exists to hear focus_exited. The
+    // capture does not survive a scene change either.
     FocusManager::get_instance().clear();
+    detail::MouseCapture::instance().clear();
     if (root_node) root_node->exit_tree();
     root_node = std::move(next_scene);
     if (root_node) root_node->enter_tree();
@@ -75,6 +79,10 @@ void SceneManager::run_frame(ConsoleRenderer& renderer, std::vector<InputEvent> 
     // After the caller's resize, so Controls measure against the buffer size
     // about to be painted.
     this->root_node->update_layout(Rect::from_size(renderer.get_buffer_size()));
+
+    // The captor sees mouse input before the tree, wherever the pointer is; what
+    // it declines continues through the normal walk.
+    Control::route_captured_input(events);
 
     this->root_node->route_input(events);
 

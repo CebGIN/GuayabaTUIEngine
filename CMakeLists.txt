@@ -155,4 +155,7 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(visibility tests/visibility.cpp)
     target_link_libraries(visibility PRIVATE GuayabaTUIEngine)
+
+    add_executable(mouse_capture tests/mouse_capture.cpp)
+    target_link_libraries(mouse_capture PRIVATE GuayabaTUIEngine)
 endif()
