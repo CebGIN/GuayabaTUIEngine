@@ -207,6 +207,115 @@ void test_progress_percentage_and_custom_text() {
     assert(terminal.glyph(5, 0) == L'k');
 }
 
+// --- Spinner ----------------------------------------------------------------
+
+void draw_spinner(Spinner& spinner, ConsoleRenderer& renderer) {
+    renderer.clear_buffer();
+    spinner.draw(renderer, Rect::from_size(renderer.get_buffer_size()));
+    renderer.present();
+}
+
+void test_spinner_advances_with_delta() {
+    Spinner spinner;
+    spinner.set_size({1, 1});
+    spinner.set_frames({"a", "b", "c"});
+    spinner.set_interval(0.1);
+
+    CapturingTerminal terminal;
+    ConsoleRenderer renderer(SCREEN, &terminal);
+    spinner.update_layout(Rect::from_size(SCREEN));
+
+    draw_spinner(spinner, renderer);
+    assert(terminal.glyph(0, 0) == L'a');
+
+    // Below one interval: still the first frame.
+    spinner.update(0.05);
+    draw_spinner(spinner, renderer);
+    assert(terminal.glyph(0, 0) == L'a');
+
+    // Crosses the interval: advances exactly one.
+    spinner.update(0.06);
+    draw_spinner(spinner, renderer);
+    assert(terminal.glyph(0, 0) == L'b');
+
+    // Two intervals at once: advances two, wrapping around.
+    spinner.update(0.2);
+    draw_spinner(spinner, renderer);
+    assert(terminal.glyph(0, 0) == L'a');
+}
+
+void test_spinner_stop_and_start() {
+    Spinner spinner;
+    spinner.set_size({1, 1});
+    spinner.set_frames({"a", "b"});
+    spinner.set_interval(0.1);
+
+    CapturingTerminal terminal;
+    ConsoleRenderer renderer(SCREEN, &terminal);
+    spinner.update_layout(Rect::from_size(SCREEN));
+
+    spinner.stop();
+    spinner.update(1.0);
+    draw_spinner(spinner, renderer);
+    assert(terminal.glyph(0, 0) == L'a');
+
+    spinner.start();
+    spinner.update(0.1);
+    draw_spinner(spinner, renderer);
+    assert(terminal.glyph(0, 0) == L'b');
+}
+
+void test_spinner_empty_frames_draws_nothing() {
+    Spinner spinner;
+    spinner.set_size({1, 1});
+    spinner.set_frames({});
+
+    CapturingTerminal terminal;
+    ConsoleRenderer renderer(SCREEN, &terminal);
+    spinner.update_layout(Rect::from_size(SCREEN));
+
+    spinner.update(1.0);
+    draw_spinner(spinner, renderer);
+    assert(terminal.glyph(0, 0) == L' ');
+}
+
+void test_spinner_invalid_interval_falls_back() {
+    Spinner spinner;
+
+    spinner.set_interval(0.0);
+    assert(spinner.get_interval() == 0.1);
+
+    spinner.set_interval(-2.0);
+    assert(spinner.get_interval() == 0.1);
+
+    spinner.set_interval(0.5);
+    assert(spinner.get_interval() == 0.5);
+}
+
+void test_spinner_hidden_does_not_advance() {
+    Spinner spinner;
+    spinner.set_size({1, 1});
+    spinner.set_frames({"a", "b"});
+    spinner.set_interval(0.1);
+
+    CapturingTerminal terminal;
+    ConsoleRenderer renderer(SCREEN, &terminal);
+    spinner.update_layout(Rect::from_size(SCREEN));
+
+    spinner.set_visible(false);
+    spinner.update(1.0);
+    spinner.set_visible(true);
+    spinner.update_layout(Rect::from_size(SCREEN));
+
+    draw_spinner(spinner, renderer);
+    assert(terminal.glyph(0, 0) == L'a');
+}
+
+void test_spinner_minimum() {
+    Spinner spinner;
+    assert((spinner.get_minimum_size() == Vec2{1, 1}));
+}
+
 } // namespace
 
 int main() {
@@ -217,6 +326,13 @@ int main() {
     test_progress_indeterminate_moves_with_delta();
     test_progress_hidden_does_not_advance();
     test_progress_percentage_and_custom_text();
+
+    test_spinner_advances_with_delta();
+    test_spinner_stop_and_start();
+    test_spinner_empty_frames_draws_nothing();
+    test_spinner_invalid_interval_falls_back();
+    test_spinner_hidden_does_not_advance();
+    test_spinner_minimum();
 
     std::cout << "basic_controls: all checks passed." << std::endl;
     return 0;
