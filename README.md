@@ -568,6 +568,7 @@ Los controles de esta version declaran ademas:
 | `ProgressBar` | `value_changed(double)` | el valor efectivo cambia; repetir el mismo `set_value` no la emite |
 | `CheckBox` | `toggled(bool)` | el estado cambia, por clic, teclado o `set_checked` |
 | `Timer` | `timeout()` | se cumple un periodo; `get_ticks()` cuenta las emisiones |
+| `SplitContainer` | `split_ratio_changed(float)` | el ratio efectivo cambia, por arrastre, teclado o `set_split_ratio` |
 
 Y en el bus, desde `Input::refresh_input()`, que el bucle ya llama **antes** de
 `process_scene()`, asi que un reactor ve el evento en el mismo frame:
@@ -1073,6 +1074,76 @@ y emite `timeout()` al cumplir el periodo; en one-shot se para, en repetitivo si
 `get_time_left()` devuelve el restante congelado cuando esta parado. `wait_time <= 0` se
 normaliza a 0.001 s. Un timer oculto no avanza.
 
+### SpinBox
+
+```cpp
+NodeRef<SpinBox> precio = root->add_child<SpinBox>("precio");
+precio->set_range(0, 1000);
+precio->set_decimals(2);
+precio->set_step(0.5);
+precio->set_value(9.99);
+```
+
+Hereda de `LineEdit` la edicion, el foco y el dibujo, y reserva las dos columnas derechas para
+las flechas (el texto no se dibuja debajo). Mientras escribes, un numero completo actualiza el
+valor en vivo sin reformatear; Enter o perder el foco lo acotan y lo reescriben con los
+decimales configurados. Arriba/Abajo suman o restan `step`, PageUp/PageDown diez pasos, y un
+clic en la franja de flechas hace lo mismo. `wrap` pasa del maximo al minimo y viceversa. Con
+`max <= min` el control queda en lectura, fijado al minimo. `step <= 0` se normaliza a `1e-9`.
+
+### SplitContainer
+
+```cpp
+NodeRef<SplitContainer> split = root->add_child<SplitContainer>("split");
+split->set_anchor_preset(AnchorPreset::FullRect);
+split->set_min_first(10);
+split->set_min_second(10);
+split->get_divider_stylebox().set_background_color("BLUE");
+
+NodeRef<Label> izq = split->add_child<Label>("izq");
+NodeRef<Label> der = split->add_child<Label>("der");
+```
+
+Dos paneles con un divisor arrastrable. El ratio es un `float` 0..1 sobre el **espacio libre**,
+asi que respeta los minimos y se conserva al redimensionar:
+
+```text
+free  = max(0, total - divider_width - min_first - min_second)
+first = min_first + round(ratio * free)
+```
+
+El divisor se dibuja solo con su `StyleBox`: por defecto esta vacio, invisible pero agarrable.
+Arrastrarlo captura el raton, asi que el movimiento sigue aunque el puntero salga del control.
+Con foco, las flechas mueven una celda por pulsacion. Solo los dos primeros hijos `Control`
+visibles son paneles; los extra y los que no son `Control` se ignoran.
+
+## Tema
+
+`Theme` centraliza `StyleBox` y colores por clave. La instancia por defecto esta vacia, asi que
+no cambia nada hasta que la rellenas; y **no se aplica sola**: el llamador decide cuando.
+
+```cpp
+Theme& tema = Theme::get_default();
+
+StyleBox panel;
+panel.set_background_color("BLUE");
+tema.set_style("panel", panel);
+tema.set_color("text.primary", Color::from_name("WHITE"));
+
+apply_theme(*escena, tema);
+```
+
+`apply_theme(root, theme)` recorre el arbol y llama al `apply_theme()` de cada `Control`; cada
+control lee sus claves y deja intacto lo que el tema no trae. `set_stylebox()` manual sigue
+mandando hasta el siguiente `apply_theme()`. `revision()` sube con cada `set_style`/`set_color`,
+por si quieres reaplicar solo cuando cambie.
+
+Claves canonicas: `panel`, `button.normal/hover/pressed/disabled`, `line_edit`, `list_view`,
+`progress_bar`, `check_box`, `spin_box`, `split_container`, `text.primary/secondary/disabled`,
+`selection.background/text`. Extensiones de esta revision: `label`, `spinner`,
+`progress_bar.fill/background/text`, `split_container.divider`. `table.*`,
+`tab_container.*` y `option_button.*` quedan reservadas hasta que existan esos controles.
+
 ## Integracion CMake
 
 El motor es una libreria estatica que no depende de nada externo. Tres modos de consumo:
@@ -1111,10 +1182,11 @@ include/guayaba/     API publica. Ninguna cabecera de plataforma es alcanzable d
                      ScriptRef, Signal, SignalBus, NodeRef, NodeRegistry
   Terminal/          IOSTerminal (interfaz abstracta) + create_system_terminal()
   Renderer/          ConsoleRenderer
+  Resources/         StyleBox, Theme
   Nodes/             Node, Node2D, NodeTextMatrix, Timer
     UI/              Control, Label, Button, CheckBox, ProgressBar, Spinner,
-                     Container, HBox, VBox, GridContainer, MarginContainer,
-                     PanelContainer, ScrollView
+                     SpinBox, Container, HBox, VBox, GridContainer,
+                     MarginContainer, PanelContainer, ScrollView, SplitContainer
   Scene/             SceneManager
 src/                 Implementaciones. Privado, no se instala.
   Core/              NodeRegistry, Signal, SignalBus,
@@ -1138,6 +1210,19 @@ no destruya nada dos veces, y que un nodo que el consumidor ya reclamo con
 cmake -S . -B build
 cmake --build build
 ```
+
+Los tests headless estan apagados por defecto (`GUAYABA_BUILD_TESTS`), para que un proyecto que
+consuma el motor por `add_subdirectory()` no herede objetivos de mas:
+
+```bash
+cmake -S . -B build-tests -DGUAYABA_BUILD_TESTS=ON
+cmake --build build-tests
+./build-tests/visibility
+```
+
+`-DGUAYABA_SANITIZE=ON` compila libreria y tests con AddressSanitizer y
+UndefinedBehaviorSanitizer (solo GCC/Clang). Los tests se compilan con `-Wall -Wextra`, sin
+`-Werror`; la libreria queda sin esos avisos.
 
 ## IntelliSense en VSCode
 
