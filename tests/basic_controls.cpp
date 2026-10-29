@@ -3,6 +3,7 @@
 // opens a real one.
 
 #include <cassert>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -455,6 +456,156 @@ void test_checkbox_custom_glyphs() {
     assert(threw);
 }
 
+// --- Timer ------------------------------------------------------------------
+
+bool near(double a, double b) {
+    return std::fabs(a - b) < 1e-9;
+}
+
+void test_timer_one_shot() {
+    Timer timer;
+    timer.set_wait_time(0.5);
+    timer.set_one_shot(true);
+
+    int fired = 0;
+    timer.connect_signal<>("timeout", [&fired] { ++fired; });
+
+    timer.start();
+    timer.update(0.4);
+    assert(fired == 0);
+
+    timer.update(0.2);
+    assert(fired == 1);
+    assert(timer.is_stopped());
+    assert(timer.get_ticks() == 1);
+
+    // Stopped: further frames change nothing.
+    timer.update(1.0);
+    assert(fired == 1);
+}
+
+void test_timer_repeats_and_counts() {
+    Timer timer;
+    timer.set_wait_time(0.5);
+    timer.start();
+
+    int fired = 0;
+    timer.connect_signal<>("timeout", [&fired] { ++fired; });
+
+    // 1.6 s spans three periods and leaves 0.1 s in the fourth.
+    timer.update(1.6);
+    assert(fired == 3);
+    assert(timer.get_ticks() == 3);
+    assert(near(timer.get_time_left(), 0.4));
+}
+
+void test_timer_variable_deltas() {
+    Timer timer;
+    timer.set_wait_time(0.5);
+    timer.start();
+
+    int fired = 0;
+    timer.connect_signal<>("timeout", [&fired] { ++fired; });
+
+    timer.update(0.2);
+    timer.update(0.2);
+    assert(fired == 0);
+
+    timer.update(0.2);  // 0.6 accumulated
+    assert(fired == 1);
+}
+
+void test_timer_stop_freezes_and_start_resets_period() {
+    Timer timer;
+    timer.set_wait_time(0.5);
+    timer.start();
+
+    int fired = 0;
+    timer.connect_signal<>("timeout", [&fired] { ++fired; });
+
+    timer.update(0.3);
+    timer.stop();
+    assert(timer.is_stopped());
+    assert(near(timer.get_time_left(), 0.2));
+
+    // Frozen while stopped.
+    timer.update(1.0);
+    assert(fired == 0);
+    assert(near(timer.get_time_left(), 0.2));
+
+    // start() restarts the period from zero.
+    timer.start();
+    assert(near(timer.get_time_left(), 0.5));
+    timer.update(0.5);
+    assert(fired == 1);
+}
+
+void test_timer_start_keeps_ticks() {
+    Timer timer;
+    timer.set_wait_time(0.1);
+    timer.start();
+    timer.update(0.1);
+    assert(timer.get_ticks() == 1);
+
+    timer.start();
+    assert(timer.get_ticks() == 1);
+
+    timer.update(0.1);
+    assert(timer.get_ticks() == 2);
+}
+
+void test_timer_invalid_wait_time_falls_back() {
+    Timer timer;
+
+    timer.set_wait_time(0.0);
+    assert(near(timer.get_wait_time(), 0.001));
+
+    timer.set_wait_time(-4.0);
+    assert(near(timer.get_wait_time(), 0.001));
+}
+
+void test_timer_autostart() {
+    SceneManager::get_instance().take_scene();
+
+    auto root = std::make_unique<Node>("root");
+    SceneManager::get_instance().change_scene(std::move(root));
+
+    ConsoleRenderer renderer(SCREEN, nullptr);
+    SceneManager::get_instance().run_frame(renderer, {});
+
+    Node* scene = SceneManager::get_instance().get_current_scene().get();
+    assert(scene != nullptr);
+
+    auto timer = std::make_unique<Timer>("timer");
+    timer->set_autostart(true);
+    timer->set_wait_time(0.5);
+    Timer* raw = timer.get();
+
+    // The scene is in the tree, so add_child() enters the timer and autostart
+    // starts it.
+    scene->add_child(std::move(timer));
+    assert(!raw->is_stopped());
+
+    raw->update(0.5);
+    assert(raw->get_ticks() == 1);
+
+    SceneManager::get_instance().take_scene();
+}
+
+void test_timer_hidden_does_not_advance() {
+    Timer timer;
+    timer.set_wait_time(0.5);
+    timer.start();
+
+    timer.set_visible(false);
+    timer.update(1.0);
+    assert(timer.get_ticks() == 0);
+
+    timer.set_visible(true);
+    timer.update(0.5);
+    assert(timer.get_ticks() == 1);
+}
+
 } // namespace
 
 int main() {
@@ -478,6 +629,15 @@ int main() {
     test_checkbox_signal_only_on_change();
     test_checkbox_draw_and_minimum();
     test_checkbox_custom_glyphs();
+
+    test_timer_one_shot();
+    test_timer_repeats_and_counts();
+    test_timer_variable_deltas();
+    test_timer_stop_freezes_and_start_resets_period();
+    test_timer_start_keeps_ticks();
+    test_timer_invalid_wait_time_falls_back();
+    test_timer_autostart();
+    test_timer_hidden_does_not_advance();
 
     std::cout << "basic_controls: all checks passed." << std::endl;
     return 0;

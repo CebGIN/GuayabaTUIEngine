@@ -34,6 +34,7 @@
 #include <guayaba/Nodes/Node.hpp>
 #include <guayaba/Nodes/Node2D.hpp>
 #include <guayaba/Nodes/NodeTextMatrix.hpp>
+#include <guayaba/Nodes/Timer.hpp>
 #include <guayaba/Nodes/UI/Button.hpp>
 #include <guayaba/Nodes/UI/CheckBox.hpp>
 #include <guayaba/Nodes/UI/Control.hpp>
