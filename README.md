@@ -1144,6 +1144,222 @@ Claves canonicas: `panel`, `button.normal/hover/pressed/disabled`, `line_edit`, 
 `progress_bar.fill/background/text`, `split_container.divider`. `table.*`,
 `tab_container.*` y `option_button.*` quedan reservadas hasta que existan esos controles.
 
+## Formato de escena `.gscene`
+
+El motor puede construir un arbol de nodos desde un archivo de texto, sin compilar una escena
+a mano. El formato cubre estructura, propiedades iniciales y apariencia mediante temas. No
+ejecuta codigo, no registra tipos propios y no conecta senales: eso sigue siendo responsabilidad
+de la aplicacion.
+
+```text
+# scenes/main.gscene
+format = 1
+name = "Main"
+theme = "themes/default.gtheme"
+
+VBox "Root" {
+    anchors = "full_rect"
+    separation = 1
+
+    Label "Title" {
+        text = "Hola, Guayaba"
+        fit_content = true
+        text_color = "BRIGHT_WHITE"
+    }
+
+    PanelContainer "Body" {
+        anchors = "full_rect"
+        style = "panel"
+
+        ListView "List" {
+            anchors = "full_rect"
+            items = ["Uno", "Dos", "Tres"]
+            selected = 0
+        }
+    }
+}
+```
+
+El archivo debe declarar `format = 1` y exactamente un nodo raiz. Cada nodo tiene tipo y nombre
+explicitos:
+
+```text
+Tipo "Nombre" {
+    clave = valor
+    Hijo "Nombre" {
+        ...
+    }
+}
+```
+
+Los nombres de hermanos deben ser unicos, no pueden estar vacios, no pueden contener `/` ni
+caracteres de control. El loader rechaza duplicados; no deja que `Node::add_child()` los
+renombre a `Nombre@2`.
+
+### Valores
+
+- Booleanos: `true`, `false`.
+- Enteros y decimales: `42`, `-3`, `0.5`, `1e3`.
+- Cadenas: `"texto"`, con escapes `\\`, `\"`, `\n`, `\r`, `\t`, `\uXXXX` y `\UXXXXXXXX`.
+- `none` para valores nulos donde el esquema lo permita.
+- Arrays: `[1, 2, 3]`, con coma final opcional.
+- Tablas inline: `{ background = "BLUE", border_width = 1 }`.
+- Colores: nombre (`"WHITE"`, `"BRIGHT_BLUE"`) o indice `0..15`.
+- Enums: cadenas; el escritor los normaliza a minusculas.
+- Comentarios con `#` hasta fin de linea. El escritor canonico **no los conserva**.
+
+No hay cadenas multilinea: los saltos se escriben como `\n`. Se aceptan BOM UTF-8 y saltos
+`LF`/`CRLF`; el escritor emite UTF-8 con `LF`.
+
+### Propiedades comunes
+
+| Tipo | Propiedades |
+|---|---|
+| `Node` | `visible` |
+| `Node2D` | `position` (`[x, y]`) |
+| `Control` | `anchors`, `anchor_left`, `anchor_right`, `anchor_top`, `anchor_bottom`, `size`, `custom_minimum_size`, `grow_x`, `grow_y`, `clip_children`, `focus_mode` |
+| `Container` | `content_alignment` |
+
+`anchors` acepta `top_left`, `top`, `top_right`, `center`, `left`, `right`, `bottom_left`,
+`bottom`, `bottom_right` y `full_rect`. No se puede combinar con `anchor_*`. Un preset aplica
+sus efectos sobre `grow`; un `grow_x`/`grow_y` explicito siempre se aplica despues.
+
+`content_alignment` se oculta en `MarginContainer`, `PanelContainer`, `ScrollView` y
+`SplitContainer`, porque su layout no lo usa.
+
+### Controles y contenedores
+
+| Tipo | Propiedades propias |
+|---|---|
+| `HBox`, `VBox` | `separation` |
+| `GridContainer` | `columns`, `h_separation`, `v_separation` |
+| `MarginContainer` | `margins` (`[left, top, right, bottom]`) |
+| `PanelContainer` | `style` |
+| `ScrollView` | `style`, `track_style`, `handle_style` |
+| `SplitContainer` | `orientation`, `split_ratio`, `min_first`, `min_second`, `divider_width`, `divider_style` |
+| `Label` | `text`, `fit_content`, `text_color`, `background_color`, `style` |
+| `Button` | `text`, `text_align`, `disabled`, `text_color.normal/hover/pressed/disabled`, `style.normal/hover/pressed/disabled` |
+| `CheckBox` | `text`, `checked`, `glyphs`, `text_color`, `background_color`, `style` |
+| `LineEdit` | `text`, `placeholder`, `max_length`, `caret`, `secret`, `secret_character`, `text_color`, `placeholder_color`, `background_color`, `style` |
+| `SpinBox` | `range`, `step`, `decimals`, `value`, `wrap`, y las heredadas de `LineEdit` salvo `text`/`caret` |
+| `ListView` | `items`, `selected`, `item_colors`, `text_color`, `selection_background_color`, `selection_text_color`, `style` |
+| `ProgressBar` | `range`, `value`, `indeterminate`, `text`, `show_percentage`, `fill_color`, `background_color`, `text_color`, `style` |
+| `Spinner` | `frames`, `interval`, `running`, `text_color`, `background_color`, `style` |
+| `Graph` | `values`, `capacity`, `range`, `fill`, `line_color`, `background_color` |
+| `Timer` | `wait_time`, `one_shot`, `autostart` |
+| `NodeTextMatrix` | `position`, `text`, `text_color`, `background_color` |
+
+`range` se escribe `[min, max]`; en `Graph`, `range = none` vuelve al rango automatico.
+`glyphs` es un par `[marcado, sin_marcar]`. `item_colors` es una lista de pares
+`[[indice, "COLOR"], ...]`. `caret` es un indice de codepoint, no de byte; el loader lo
+convierte al offset UTF-8 que espera `LineEdit`.
+
+`ListView.scroll`, `ScrollView.scroll_offset` y `Timer.running` no se serializan: dependen del
+layout o del estado de ejecucion.
+
+### Estilos y temas
+
+`style` acepta tres formas:
+
+```text
+style = "panel"                    # estilo con nombre del .gtheme
+style = none                       # StyleBox vacio
+style = { background = "BLUE" }    # tabla inline
+```
+
+Un `StyleBox` inline admite `background`, `border`, `border_style`, `border_width`,
+`corner_radius` y `margin`. Los estilos con nombre deben existir en el tema; si no hay tema
+cargado, referenciarlos es un error.
+
+```text
+# themes/default.gtheme
+format = 1
+name = "Default"
+
+style "panel" {
+    background = "BLUE"
+    border = "WHITE"
+    border_style = "rounded"
+    border_width = 1
+    corner_radius = 1
+    margin = [1, 0, 1, 0]
+}
+
+color "text.primary" = "WHITE"
+```
+
+Claves que ya leen los controles: `panel`, `button.normal/hover/pressed/disabled`, `line_edit`,
+`list_view`, `progress_bar`, `check_box`, `spin_box`, `split_container`,
+`split_container.divider`, `label`, `spinner`, `text.primary`, `text.secondary`,
+`text.disabled`, `selection.background`, `selection.text`, `progress_bar.fill`,
+`progress_bar.background` y `progress_bar.text`. Se permiten claves adicionales para estilos
+con nombre referenciados desde la escena.
+
+El tema se aplica a cada control **antes** de sus propiedades explicitas, asi que un
+`style.normal`, un `text_color` o un `style` de la escena siempre gana sobre el tema.
+`SpinBox` conserva las dos columnas de flechas al recibir un estilo explicito.
+
+### API de carga
+
+```cpp
+#include <guayaba/Guayaba.hpp>
+
+using namespace guayaba;
+
+auto asset = SceneLoader::load_file("scenes/main.gscene");
+SceneManager::get_instance().change_scene(std::move(asset.root));
+```
+
+`SceneLoader::load_file()` resuelve el tema relativo al `.gscene`, lo posee en
+`SceneAsset::theme` y lanza `SceneError` si falla el parseo, el tema o la construccion.
+
+Para trabajar sin archivos:
+
+```cpp
+auto parsed = parse_scene(texto, SceneParseOptions{"main.gscene"});
+if (!parsed.ok()) {
+    for (const SceneDiagnostic& d : parsed.diagnostics)
+        std::cerr << d.format() << '\n';
+}
+
+auto built = build_scene(parsed.document, tema);
+if (!built.ok()) { /* built.diagnostics */ }
+```
+
+`build_scene()` no toma posesion del tema. `load_file()` lo mantiene vivo en el `SceneAsset`.
+
+### Editor de escenas
+
+La capa de datos para un editor ya esta separada del runtime:
+
+- `SceneDocument` es un AST mutable con nodos, propiedades, valores y spans.
+- `SceneSchema::builtins()` describe tipos, propiedades, defaults, enums y categorias.
+- `validate_scene(document, strict, source)` comprueba estructura, nombres, duplicados y formas
+  de valor sin construir nodos.
+- `write_scene(document)` produce la forma canonica.
+- `write_theme(document)` produce la forma canonica de un `.gtheme`.
+
+El editor puede editar el AST, validarlo, previsualizarlo con `build_scene()` y guardarlo. El
+guardado canonico normaliza indentacion, orden de propiedades y valores; **los comentarios se
+pierden**. Las propiedades explicitas se conservan aunque coincidan con su default, porque un
+tema se aplica antes que ellas y borrarlas cambiaria la apariencia. La opcion
+`SceneWriteOptions::include_defaults` añade tambien las propiedades ausentes; como el tema se
+aplica antes, esos defaults materializados pueden tapar el tema al recargar. Las propiedades
+desconocidas se conservan en el AST y el escritor las emite, pero el builder estricto las
+rechaza.
+
+### Limites de esta version
+
+- Solo tipos del motor. No hay registro publico de nodos o propiedades propias.
+- Sin scripts, senales, acciones ni componentes declarativos.
+- Sin prefabs, includes ni referencias entre escenas.
+- Sin conservacion de comentarios.
+- Sin `scroll` inicial en `ListView`/`ScrollView`.
+- El escritor serializa el AST, no un arbol vivo: no depende de getters ausentes y no captura
+  estado derivado del runtime.
+
+La gramatica, los valores y el esquema viven en `include/guayaba/Scene/` y `src/Scene/`.
+
 ## Integracion CMake
 
 El motor es una libreria estatica que no depende de nada externo. Tres modos de consumo:
@@ -1187,10 +1403,12 @@ include/guayaba/     API publica. Ninguna cabecera de plataforma es alcanzable d
     UI/              Control, Label, Button, CheckBox, ProgressBar, Spinner,
                      SpinBox, Container, HBox, VBox, GridContainer,
                      MarginContainer, PanelContainer, ScrollView, SplitContainer
-  Scene/             SceneManager
+  Scene/             SceneManager, SceneFormat, SceneParser, SceneSchema,
+                     SceneValidation, SceneWriter, SceneLoader, ThemeFormat
 src/                 Implementaciones. Privado, no se instala.
   Core/              NodeRegistry, Signal, SignalBus,
                      DeletionQueue (cola de destruccion diferida)
+  Scene/             Lexer, parser, schema, builder y writer del formato
   Terminal/          Backends Linux/macOS (termios) y Windows (Win32)
 ```
 
@@ -1218,6 +1436,7 @@ consuma el motor por `add_subdirectory()` no herede objetivos de mas:
 cmake -S . -B build-tests -DGUAYABA_BUILD_TESTS=ON
 cmake --build build-tests
 ./build-tests/visibility
+./build-tests/scene_format
 ```
 
 `-DGUAYABA_SANITIZE=ON` compila libreria y tests con AddressSanitizer y

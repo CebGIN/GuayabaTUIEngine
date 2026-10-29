@@ -2,6 +2,7 @@
 build/
 build-tests/
 build-asan/
+build-sanitize/
 cmake-build-*/
 out/
 *.o

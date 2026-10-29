@@ -178,4 +178,7 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(theme tests/theme.cpp)
     target_link_libraries(theme PRIVATE GuayabaTUIEngine)
+
+    add_executable(scene_format tests/scene_format.cpp)
+    target_link_libraries(scene_format PRIVATE GuayabaTUIEngine)
 endif()

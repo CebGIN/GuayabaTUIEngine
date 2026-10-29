@@ -55,7 +55,14 @@
 #include <guayaba/Nodes/UI/VBox.hpp>
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
 #include <guayaba/Resources/Theme.hpp>
+#include <guayaba/Scene/SceneFormat.hpp>
+#include <guayaba/Scene/SceneLoader.hpp>
 #include <guayaba/Scene/SceneManager.hpp>
+#include <guayaba/Scene/SceneParser.hpp>
+#include <guayaba/Scene/SceneSchema.hpp>
+#include <guayaba/Scene/SceneValidation.hpp>
+#include <guayaba/Scene/SceneWriter.hpp>
+#include <guayaba/Scene/ThemeFormat.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
 
 #endif // GUAYABA_GUAYABA_HPP
