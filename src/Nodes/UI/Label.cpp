@@ -4,6 +4,7 @@
 #include <guayaba/Core/Color.hpp>
 #include <guayaba/Core/TextWrap.hpp>
 #include <guayaba/Nodes/UI/Label.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -84,6 +85,16 @@ void Label::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     // Hand back to Control so the script hook runs and children use the clip
     // Control narrows for them.
     Control::on_draw(renderer, clip);
+}
+
+void Label::apply_theme(const Theme& theme) {
+    stylebox = theme.get_style("label", stylebox);
+    text_color = theme.get_color("text.primary", text_color);
+
+    // The frame may have changed the content width; the wrap is recomputed on
+    // the next layout pass.
+    measured_size_valid = false;
+    invalidate_cache_recursively();
 }
 
 } // namespace guayaba

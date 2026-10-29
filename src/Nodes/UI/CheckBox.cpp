@@ -4,6 +4,7 @@
 
 #include <guayaba/Core/Utf8.hpp>
 #include <guayaba/Nodes/UI/CheckBox.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -101,6 +102,11 @@ bool CheckBox::on_gui_input(const InputEvent& event) {
     }
 
     return false;
+}
+
+void CheckBox::apply_theme(const Theme& theme) {
+    stylebox = theme.get_style("check_box", stylebox);
+    text_color = theme.get_color("text.primary", text_color);
 }
 
 } // namespace guayaba

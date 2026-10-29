@@ -13,6 +13,7 @@
 namespace guayaba {
 
 class FocusManager;
+class Theme;
 
 /*
     Base class for nodes that lay themselves out.
@@ -108,6 +109,11 @@ public:
     void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     void invalidate_cache_recursively() override;
+
+    // Reads this control's keys from `theme` and applies them. Empty by default;
+    // concrete controls override it. Not applied automatically: the caller
+    // decides when to run apply_theme(root, theme).
+    virtual void apply_theme(const Theme& theme);
 
     // --- Input ----------------------------------------------------------------
 

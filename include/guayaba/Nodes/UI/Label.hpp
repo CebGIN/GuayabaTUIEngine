@@ -103,6 +103,9 @@ public:
 
     // A StyleBox change moves the content rect, so the wrap is recomputed.
     void set_stylebox(StyleBox new_stylebox);
+
+    // Keys: "label", "text.primary".
+    void apply_theme(const Theme& theme) override;
 };
 
 } // namespace guayaba

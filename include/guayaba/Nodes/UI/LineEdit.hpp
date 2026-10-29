@@ -138,6 +138,9 @@ public:
     // The band the text and caret sit on. A StyleBox background wins where the two overlap.
     void set_background_color(uint16_t color) { background_color = color; }
     void set_background_color(const std::string& color_name);
+
+    // Keys: "line_edit", "text.primary", "text.secondary".
+    void apply_theme(const Theme& theme) override;
 };
 
 } // namespace guayaba

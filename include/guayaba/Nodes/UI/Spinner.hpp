@@ -71,6 +71,9 @@ public:
 
     StyleBox& get_stylebox() { return stylebox; }
     const StyleBox& get_stylebox() const { return stylebox; }
+
+    // Keys: "spinner", "text.primary".
+    void apply_theme(const Theme& theme) override;
 };
 
 } // namespace guayaba

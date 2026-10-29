@@ -108,6 +108,11 @@ void Control::invalidate_cache_recursively() {
     Node2D::invalidate_cache_recursively();
 }
 
+void Control::apply_theme(const Theme& theme) {
+    // Controls with something to theme override this.
+    (void)theme;
+}
+
 // --- Anchors ----------------------------------------------------------------
 
 AnchorPreset Control::get_anchor_preset() const {

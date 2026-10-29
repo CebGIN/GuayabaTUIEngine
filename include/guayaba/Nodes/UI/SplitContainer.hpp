@@ -97,6 +97,9 @@ public:
     StyleBox& get_divider_stylebox() { return divider_stylebox; }
     const StyleBox& get_divider_stylebox() const { return divider_stylebox; }
 
+    // Keys: "split_container.divider".
+    void apply_theme(const Theme& theme) override;
+
 protected:
     bool on_gui_input(const InputEvent& event) override;
 };

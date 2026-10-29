@@ -2,6 +2,7 @@
 #include <cmath>
 
 #include <guayaba/Nodes/UI/SplitContainer.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -214,6 +215,10 @@ bool SplitContainer::on_gui_input(const InputEvent& event) {
     }
 
     return false;
+}
+
+void SplitContainer::apply_theme(const Theme& theme) {
+    divider_stylebox = theme.get_style("split_container.divider", divider_stylebox);
 }
 
 } // namespace guayaba

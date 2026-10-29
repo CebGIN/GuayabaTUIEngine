@@ -2,6 +2,7 @@
 #include <cmath>
 
 #include <guayaba/Nodes/UI/Spinner.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -71,6 +72,11 @@ void Spinner::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     }
 
     Control::on_draw(renderer, clip);
+}
+
+void Spinner::apply_theme(const Theme& theme) {
+    stylebox = theme.get_style("spinner", stylebox);
+    text_color = theme.get_color("text.primary", text_color);
 }
 
 } // namespace guayaba

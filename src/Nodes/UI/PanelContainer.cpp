@@ -2,6 +2,7 @@
 #include <utility>
 
 #include <guayaba/Nodes/UI/PanelContainer.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -38,6 +39,11 @@ void PanelContainer::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
 
     // Hand back to Control so children use the clip it narrows for them.
     Control::on_draw(renderer, clip);
+}
+
+void PanelContainer::apply_theme(const Theme& theme) {
+    stylebox = theme.get_style("panel", stylebox);
+    invalidate_cache_recursively();
 }
 
 } // namespace guayaba

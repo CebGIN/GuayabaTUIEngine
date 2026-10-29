@@ -133,6 +133,9 @@ public:
     void set_text_color(ButtonState state, const std::string& color_name) {
         text_colors[static_cast<int>(state)] = Color::from_name(color_name);
     }
+
+    // Keys: button.normal/hover/pressed/disabled, text.primary, text.disabled.
+    void apply_theme(const Theme& theme) override;
 };
 
 } // namespace guayaba

@@ -5,6 +5,7 @@
 #include <guayaba/Core/InputEvent.hpp>
 #include <guayaba/Core/Utf8.hpp>
 #include <guayaba/Nodes/UI/ListView.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -282,6 +283,14 @@ void ListView::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     // Hand back to Control so the script hook runs and children use the clip
     // Control narrows for them.
     Control::on_draw(renderer, clip);
+}
+
+void ListView::apply_theme(const Theme& theme) {
+    set_stylebox(theme.get_style("list_view", stylebox));
+    text_color = theme.get_color("text.primary", text_color);
+    selection_background_color =
+        theme.get_color("selection.background", selection_background_color);
+    selection_text_color = theme.get_color("selection.text", selection_text_color);
 }
 
 } // namespace guayaba

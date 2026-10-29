@@ -69,6 +69,9 @@ public:
     StyleBox& get_stylebox() { return stylebox; }
     const StyleBox& get_stylebox() const { return stylebox; }
 
+    // Keys: "check_box", "text.primary".
+    void apply_theme(const Theme& theme) override;
+
 protected:
     bool on_gui_input(const InputEvent& event) override;
 };

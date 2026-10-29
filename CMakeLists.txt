@@ -175,4 +175,7 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(split_container tests/split_container.cpp)
     target_link_libraries(split_container PRIVATE GuayabaTUIEngine)
+
+    add_executable(theme tests/theme.cpp)
+    target_link_libraries(theme PRIVATE GuayabaTUIEngine)
 endif()

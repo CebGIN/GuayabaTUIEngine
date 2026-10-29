@@ -108,6 +108,9 @@ public:
 
     void clear_item_colors();
 
+    // Keys: "list_view", "text.primary", "selection.background", "selection.text".
+    void apply_theme(const Theme& theme) override;
+
 protected:
     // The area inside the border and margins; empty when the box is too small.
     Rect content_rect() const;

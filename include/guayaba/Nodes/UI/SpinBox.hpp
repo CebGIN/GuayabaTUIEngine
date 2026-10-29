@@ -96,6 +96,10 @@ public:
     void set_wrap(bool enabled) { wrap = enabled; }
     bool get_wrap() const { return wrap; }
 
+    // Keys: "spin_box" (falling back to "line_edit"), "text.primary",
+    // "text.secondary". The two arrow columns are added to the theme's box.
+    void apply_theme(const Theme& theme) override;
+
 protected:
     bool on_gui_input(const InputEvent& event) override;
 };

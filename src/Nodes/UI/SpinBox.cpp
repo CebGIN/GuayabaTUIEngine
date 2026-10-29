@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <guayaba/Nodes/UI/SpinBox.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -223,6 +224,18 @@ void SpinBox::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
         renderer.put_char({zone.pos.x, zone.pos.y + zone.size.y - 1},
                           L'▼', text_color, background_color, clip);
     }
+}
+
+void SpinBox::apply_theme(const Theme& theme) {
+    // spin_box wins over line_edit, and the two arrow columns are added on top of
+    // whatever box the theme provides.
+    StyleBox box = theme.get_style("spin_box", theme.get_style("line_edit", stylebox));
+    const EdgeSize margin = box.get_content_margin();
+    box.set_content_margin(margin.left, margin.top, margin.right + 2, margin.bottom);
+    stylebox = std::move(box);
+
+    text_color = theme.get_color("text.primary", text_color);
+    placeholder_color = theme.get_color("text.secondary", placeholder_color);
 }
 
 } // namespace guayaba

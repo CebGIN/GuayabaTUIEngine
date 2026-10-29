@@ -46,6 +46,9 @@ public:
     const StyleBox& get_stylebox() const { return stylebox; }
 
     void set_stylebox(StyleBox new_stylebox) { stylebox = std::move(new_stylebox); }
+
+    // Keys: "panel".
+    void apply_theme(const Theme& theme) override;
 };
 
 } // namespace guayaba

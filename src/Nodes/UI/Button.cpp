@@ -5,6 +5,7 @@
 #include <guayaba/Core/Input.hpp>
 #include <guayaba/Core/TextWrap.hpp>
 #include <guayaba/Nodes/UI/Button.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -143,6 +144,28 @@ void Button::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     // Hand back to Control so the script hook runs and children use the clip
     // Control narrows for them.
     Control::on_draw(renderer, clip);
+}
+
+void Button::apply_theme(const Theme& theme) {
+    static const char* const keys[] = {
+        "button.normal", "button.hover", "button.pressed", "button.disabled",
+    };
+    for (int i = 0; i < 4; ++i) {
+        styleboxes[i] = theme.get_style(keys[i], styleboxes[i]);
+    }
+
+    const int normal = static_cast<int>(ButtonState::Normal);
+    const int hover = static_cast<int>(ButtonState::Hover);
+    const int pressed = static_cast<int>(ButtonState::Pressed);
+    const int disabled = static_cast<int>(ButtonState::Disabled);
+
+    text_colors[normal] = theme.get_color("text.primary", text_colors[normal]);
+    text_colors[hover] = theme.get_color("text.primary", text_colors[hover]);
+    text_colors[pressed] = theme.get_color("text.primary", text_colors[pressed]);
+    text_colors[disabled] = theme.get_color("text.disabled", text_colors[disabled]);
+
+    // A box change can move the content rect and the wrap.
+    invalidate_cache_recursively();
 }
 
 } // namespace guayaba

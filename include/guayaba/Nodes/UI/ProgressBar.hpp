@@ -96,6 +96,10 @@ public:
 
     StyleBox& get_stylebox() { return stylebox; }
     const StyleBox& get_stylebox() const { return stylebox; }
+
+    // Keys: "progress_bar", "progress_bar.fill", "progress_bar.background",
+    // "progress_bar.text".
+    void apply_theme(const Theme& theme) override;
 };
 
 } // namespace guayaba

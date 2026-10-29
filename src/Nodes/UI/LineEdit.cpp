@@ -5,6 +5,7 @@
 #include <guayaba/Core/InputEvent.hpp>
 #include <guayaba/Core/Utf8.hpp>
 #include <guayaba/Nodes/UI/LineEdit.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -325,6 +326,12 @@ void LineEdit::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     // Hand back to Control so the script hook runs and children use the clip
     // Control narrows for them.
     Control::on_draw(renderer, clip);
+}
+
+void LineEdit::apply_theme(const Theme& theme) {
+    set_stylebox(theme.get_style("line_edit", stylebox));
+    text_color = theme.get_color("text.primary", text_color);
+    placeholder_color = theme.get_color("text.secondary", placeholder_color);
 }
 
 } // namespace guayaba

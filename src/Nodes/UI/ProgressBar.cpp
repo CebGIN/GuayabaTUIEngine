@@ -4,6 +4,7 @@
 
 #include <guayaba/Core/Utf8.hpp>
 #include <guayaba/Nodes/UI/ProgressBar.hpp>
+#include <guayaba/Resources/Theme.hpp>
 
 namespace guayaba {
 
@@ -118,6 +119,13 @@ void ProgressBar::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     }
 
     Control::on_draw(renderer, clip);
+}
+
+void ProgressBar::apply_theme(const Theme& theme) {
+    stylebox = theme.get_style("progress_bar", stylebox);
+    fill_color = theme.get_color("progress_bar.fill", fill_color);
+    background_color = theme.get_color("progress_bar.background", background_color);
+    text_color = theme.get_color("progress_bar.text", text_color);
 }
 
 } // namespace guayaba

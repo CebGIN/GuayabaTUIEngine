@@ -54,6 +54,7 @@
 #include <guayaba/Nodes/UI/SplitContainer.hpp>
 #include <guayaba/Nodes/UI/VBox.hpp>
 #include <guayaba/Renderer/ConsoleRenderer.hpp>
+#include <guayaba/Resources/Theme.hpp>
 #include <guayaba/Scene/SceneManager.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
 
