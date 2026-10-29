@@ -158,4 +158,9 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(mouse_capture tests/mouse_capture.cpp)
     target_link_libraries(mouse_capture PRIVATE GuayabaTUIEngine)
+
+    # call_deferred() se prueba tambien desde otro hilo.
+    find_package(Threads REQUIRED)
+    add_executable(deferred_calls tests/deferred_calls.cpp)
+    target_link_libraries(deferred_calls PRIVATE GuayabaTUIEngine Threads::Threads)
 endif()

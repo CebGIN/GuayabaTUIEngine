@@ -9,7 +9,9 @@
 #include <guayaba/Terminal/IOSTerminal.hpp>
 
 #include <chrono>
+#include <iterator>
 #include <thread>
+#include <utility>
 
 #include "../Core/DeletionQueue.hpp"
 #include "../Core/MouseCapture.hpp"
@@ -43,6 +45,38 @@ std::unique_ptr<Node> SceneManager::take_scene() {
     return std::move(root_node);
 }
 
+void SceneManager::call_deferred(std::function<void()> call) {
+    if (!call) return;
+
+    std::lock_guard<std::mutex> lock(deferred_mutex);
+    deferred_calls.push_back(std::move(call));
+}
+
+void SceneManager::drain_deferred_calls() {
+    // Swapped out under the lock, so a call queued while this runs lands in the
+    // real queue and waits for the next frame.
+    std::vector<std::function<void()>> pending;
+    {
+        std::lock_guard<std::mutex> lock(deferred_mutex);
+        pending.swap(deferred_calls);
+    }
+
+    for (size_t i = 0; i < pending.size(); ++i) {
+        try {
+            pending[i]();
+        } catch (...) {
+            // The failed call is spent. The ones behind it go back to the front,
+            // so the queue stays usable and nothing is lost.
+            std::lock_guard<std::mutex> lock(deferred_mutex);
+            deferred_calls.insert(
+                deferred_calls.begin(),
+                std::make_move_iterator(pending.begin() + static_cast<std::ptrdiff_t>(i + 1)),
+                std::make_move_iterator(pending.end()));
+            throw;
+        }
+    }
+}
+
 void SceneManager::apply_pending_scene() {
     if (!next_scene) return;
 
@@ -61,6 +95,10 @@ void SceneManager::run_frame(ConsoleRenderer& renderer, std::vector<InputEvent> 
     if (!root_node) return;
 
     renderer.clear_buffer();
+
+    // Before layout, so a deferred change is visible to the layout of this same
+    // frame. A call queued from here waits for the next one.
+    drain_deferred_calls();
 
     /*
         Five steps, in this order, and the order is the contract:

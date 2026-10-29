@@ -2,7 +2,9 @@
 #define GUAYABA_SCENE_SCENEMANAGER_HPP
 
 #include <chrono>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <guayaba/Core/InputEvent.hpp>
@@ -46,15 +48,40 @@ class SceneManager {
 
         std::unique_ptr<IOSTerminal> os_terminal;
 
+        // Calls waiting for the next frame. The mutex makes call_deferred() safe
+        // from any thread; the queue itself is only touched by the frame thread
+        // while holding it.
+        std::mutex deferred_mutex;
+        std::vector<std::function<void()>> deferred_calls;
+
         // Applies a pending change_scene(), if any. Separated from run_frame() so
         // start_running() can apply it before polling the terminal, which is the
         // order the loop has always used.
         void apply_pending_scene();
 
+        // Runs and empties the queue. Called by run_frame() before layout, so a
+        // deferred change is visible to this frame. Private on purpose: tests
+        // exercise it through run_frame().
+        void drain_deferred_calls();
+
     public:
         static SceneManager& get_instance();
 
         void process_scene();
+
+        /*
+            Queues `call` to run at the start of the next frame, before layout.
+            Safe from any thread, including one that is not the frame thread. An
+            empty std::function is ignored.
+
+            A call queued from inside a deferred call runs on the following frame,
+            not in the same drain. If a call throws, the ones after it are put back
+            at the front of the queue and the exception propagates.
+
+            Deferred calls survive a scene change. Capture what you need by id or
+            with a NodeRef, never as a raw node pointer.
+        */
+        void call_deferred(std::function<void()> call);
 
         /*
             Runs one frame against a renderer and a set of events the caller owns.
