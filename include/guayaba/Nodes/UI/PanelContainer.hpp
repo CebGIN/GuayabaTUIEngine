@@ -34,11 +34,11 @@ public:
     explicit PanelContainer(const std::string& node_name = "Unnamed PanelContainer",
                             Vec2 node_position = {0, 0});
 
-    void update_layout(const Rect& parent_rect) override;
+    void on_update_layout(const Rect& parent_rect) override;
 
     Vec2 get_minimum_size() const override;
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override;
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     // --- Appearance ---------------------------------------------------------
 

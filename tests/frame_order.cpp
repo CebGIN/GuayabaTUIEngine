@@ -57,29 +57,29 @@ public:
 
     bool consume = false;
 
-    void update_layout(const Rect& parent_rect) override {
+    void on_update_layout(const Rect& parent_rect) override {
         record("layout");
-        Control::update_layout(parent_rect);
+        Control::on_update_layout(parent_rect);
     }
 
-    void route_input(std::vector<InputEvent>& events) override {
+    void on_route_input(std::vector<InputEvent>& events) override {
         record("input");
-        Control::route_input(events);
+        Control::on_route_input(events);
     }
 
-    void route_unhandled_input(const InputEvent& event) override {
+    void on_route_unhandled_input(const InputEvent& event) override {
         record("unhandled");
-        Node::route_unhandled_input(event);
+        Node::on_route_unhandled_input(event);
     }
 
-    void update(double delta_time) override {
+    void on_update(double delta_time) override {
         record("update");
-        Node::update(delta_time);
+        Node::on_update(delta_time);
     }
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override {
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override {
         record("draw");
-        Control::draw(renderer, clip);
+        Control::on_draw(renderer, clip);
     }
 
 protected:

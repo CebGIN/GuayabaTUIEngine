@@ -252,13 +252,13 @@ bool LineEdit::on_gui_input(const InputEvent& event) {
 
 // --- Drawing ----------------------------------------------------------------
 
-void LineEdit::draw(ConsoleRenderer& renderer, const Rect& clip) {
+void LineEdit::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     // Drawn exactly as large as it is, clipped only by its ancestors.
     stylebox.apply(renderer, get_rect(), clip);
 
     const Rect content = content_rect();
     if (content.is_empty()) {
-        Control::draw(renderer, clip);
+        Control::on_draw(renderer, clip);
         return;
     }
 
@@ -324,7 +324,7 @@ void LineEdit::draw(ConsoleRenderer& renderer, const Rect& clip) {
 
     // Hand back to Control so the script hook runs and children use the clip
     // Control narrows for them.
-    Control::draw(renderer, clip);
+    Control::on_draw(renderer, clip);
 }
 
 } // namespace guayaba

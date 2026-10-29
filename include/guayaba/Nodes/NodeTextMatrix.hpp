@@ -30,7 +30,7 @@ public:
 
     bool is_inside(const Vec2 point);
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override;
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     void change_text_color(const std::string& text_color_name);
 

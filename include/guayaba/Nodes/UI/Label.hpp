@@ -57,9 +57,9 @@ protected:
 public:
     explicit Label(const std::string& node_name = "Unnamed Label", Vec2 node_position = {0, 0});
 
-    void update_layout(const Rect& parent_rect) override;
+    void on_update_layout(const Rect& parent_rect) override;
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override;
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     // --- Size ----------------------------------------------------------------
 

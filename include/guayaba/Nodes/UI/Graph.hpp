@@ -38,7 +38,7 @@ public:
     explicit Graph(const std::string& node_name = "Unnamed Graph",
                    Vec2 node_position = {0, 0});
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override;
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     // The caller's floor, at least one row tall. The width is not derived from the
     // data; the series scrolls its window.

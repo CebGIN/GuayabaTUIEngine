@@ -7,8 +7,8 @@ namespace guayaba {
 Container::Container(const std::string& node_name, Vec2 node_position)
     : Control(node_name, node_position) {}
 
-void Container::update_layout(const Rect& parent_rect) {
-    // resolve_rect, not Control::update_layout: the base would hand our own rect
+void Container::on_update_layout(const Rect& parent_rect) {
+    // resolve_rect, not Control::on_update_layout: the base would hand our own rect
     // down and then we would lay the children out twice.
     resolve_rect(parent_rect);
 
@@ -19,6 +19,10 @@ void Container::update_layout(const Rect& parent_rect) {
 
 void Container::place_child(size_t index, const Rect& rect) {
     Node* child = children[index].get();
+
+    // A hidden child keeps its place in the tree but takes no room and is not
+    // laid out; showing it again lays it out on the next pass.
+    if (!child->is_visible()) return;
 
     // Every positioned child is placed, not only the Controls: a NodeTextMatrix is
     // laid out against the same rect. A plain Node has no position and is skipped.
@@ -37,6 +41,8 @@ Vec2 Container::get_minimum_size() const {
     // without a cycle.
     Vec2 content{0, 0};
     for (const std::unique_ptr<Node>& child : children) {
+        if (!child->is_visible()) continue;
+
         const Control* as_control = dynamic_cast<const Control*>(child.get());
         if (as_control == nullptr) continue;
 

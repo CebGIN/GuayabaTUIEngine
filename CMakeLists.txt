@@ -11,14 +11,15 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# --- Sanitizers (opt-in) ------------------------------------------------------------
-# Instruments the library and the tests. GCC/Clang only: MSVC has no equivalent
-# spelling, and silently ignoring the option would hide that.
-option(GUAYABA_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+# --- Sanitizers (opcional) ----------------------------------------------------------
+# Instrumenta la libreria y los tests. Solo GCC/Clang: MSVC no tiene una opcion
+# equivalente, y aceptarla en silencio ocultaria que no hace nada.
+option(GUAYABA_SANITIZE "Compila con AddressSanitizer y UndefinedBehaviorSanitizer" OFF)
 
 if(GUAYABA_SANITIZE)
     if(MSVC)
-        message(FATAL_ERROR "GUAYABA_SANITIZE is only supported with GCC and Clang.")
+        message(FATAL_ERROR
+            "GUAYABA_SANITIZE solo esta soportado con GCC y Clang.")
     endif()
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
@@ -120,8 +121,8 @@ install(FILES
 option(GUAYABA_BUILD_TESTS "Build GuayabaTUIEngine's headless layout tests" OFF)
 
 if(GUAYABA_BUILD_TESTS)
-    # Warnings only on the tests: the library stays as it was, and nothing here
-    # is -Werror, so a stricter compiler does not break the build.
+    # Avisos solo en los tests: la libreria queda como estaba, y nada de esto
+    # es -Werror, para que un compilador mas estricto no rompa la build.
     if(MSVC)
         add_compile_options(/W4)
     else()
@@ -151,4 +152,7 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(frame_order tests/frame_order.cpp)
     target_link_libraries(frame_order PRIVATE GuayabaTUIEngine)
+
+    add_executable(visibility tests/visibility.cpp)
+    target_link_libraries(visibility PRIVATE GuayabaTUIEngine)
 endif()

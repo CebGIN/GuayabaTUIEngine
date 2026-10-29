@@ -10,7 +10,10 @@ namespace guayaba {
 namespace {
 
 void collect_focusable(Node* node, std::vector<Control*>& out) {
-    if (node == nullptr) return;
+    // A hidden subtree is skipped whole: neither it nor its descendants can take
+    // the focus, so there is no point walking into it.
+    if (node == nullptr || !node->is_visible_in_tree()) return;
+
     if (Control* control = dynamic_cast<Control*>(node)) {
         if (control->get_focus_mode() != Control::FocusMode::NONE) {
             out.push_back(control);

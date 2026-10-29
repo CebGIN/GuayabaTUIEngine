@@ -108,9 +108,9 @@ Vec2 ScrollView::get_minimum_size() const {
     return {std::max(own.x, frame.x + TRACK_WIDTH), std::max(own.y, frame.y)};
 }
 
-void ScrollView::update(double delta_time) {
+void ScrollView::on_update(double delta_time) {
     // Input arrives through on_gui_input; only the visual/layout side is left here.
-    PanelContainer::update(delta_time);
+    Node::on_update(delta_time);
 }
 
 bool ScrollView::can_receive_input(const InputEvent& event) const {
@@ -179,8 +179,8 @@ bool ScrollView::on_gui_input(const InputEvent& event) {
     return false;
 }
 
-void ScrollView::update_layout(const Rect& parent_rect) {
-    // resolve_rect then the viewport offset, not Control::update_layout: the
+void ScrollView::on_update_layout(const Rect& parent_rect) {
+    // resolve_rect then the viewport offset, not Control::on_update_layout: the
     // child's rect moves by the scroll offset while its size stays the content
     // rect.
     resolve_rect(parent_rect);
@@ -202,7 +202,7 @@ void ScrollView::update_layout(const Rect& parent_rect) {
     for (size_t i = 0; i < children.size(); ++i) place_child(i, scrolled);
 }
 
-void ScrollView::draw(ConsoleRenderer& renderer, const Rect& clip) {
+void ScrollView::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     stylebox.apply(renderer, get_rect(), clip);
 
     // Drawn only when there is something to scroll; the reserved column stays
@@ -230,7 +230,7 @@ void ScrollView::draw(ConsoleRenderer& renderer, const Rect& clip) {
     // Handed the viewport rather than letting Control narrow to get_rect(): the
     // handle is drawn outside get_rect(). The viewport is get_rect() less the
     // border and margins, so the content stops at the panel's edge.
-    Node::draw(renderer, viewport_rect().intersection(clip));
+    Node::on_draw(renderer, viewport_rect().intersection(clip));
 }
 
 } // namespace guayaba

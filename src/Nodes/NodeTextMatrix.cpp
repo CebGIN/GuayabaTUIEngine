@@ -31,11 +31,11 @@ bool NodeTextMatrix::is_inside(const Vec2 point){
             point.y >= global_pos.y && point.y < global_pos.y + size.y);
 }
 
-void NodeTextMatrix::draw(ConsoleRenderer& renderer, const Rect& clip) {
+void NodeTextMatrix::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     Vec2 global_pos = get_global_position();
 
     renderer.put_text(global_pos, text, text_color, background_color, clip);
-    Node::draw(renderer, clip);
+    Node::on_draw(renderer, clip);
 }
 
 void NodeTextMatrix::change_text_color(const std::string& text_color_name){

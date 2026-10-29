@@ -1,9 +1,11 @@
 #include <algorithm>
 
+#include <guayaba/Core/Focus.hpp>
 #include <guayaba/Core/NodeRef.hpp>
 #include <guayaba/Core/Script.hpp>
 #include <guayaba/Core/ScriptRef.hpp>
 #include <guayaba/Nodes/Node.hpp>
+#include <guayaba/Nodes/UI/Control.hpp>
 
 #include "../Core/DeletionQueue.hpp"
 
@@ -333,7 +335,48 @@ size_t Node::live_node_count() {
     return detail::NodeRegistry::instance().live_count();
 }
 
+// --- Visibility -------------------------------------------------------------
+
+void Node::set_visible(bool visible) {
+    if (visible_ == visible) return;
+    visible_ = visible;
+
+    if (!visible) {
+        // Only a focus inside the subtree that just went away is released; another
+        // control's focus is not ours to take.
+        Control* focused = FocusManager::get_instance().get_focused();
+        if (focused != nullptr && is_ancestor_of(focused)) {
+            FocusManager::get_instance().clear();
+        }
+    }
+
+    // The old rect must not be hit-tested while hidden, and the first frame after
+    // showing resolves fresh ones.
+    invalidate_cache_recursively();
+}
+
+bool Node::is_visible_in_tree() const {
+    for (const Node* node = this; node != nullptr; node = node->parent) {
+        if (!node->visible_) return false;
+    }
+    return true;
+}
+
+bool Node::is_ancestor_of(const Node* node) const {
+    for (const Node* ancestor = node; ancestor != nullptr; ancestor = ancestor->parent) {
+        if (ancestor == this) return true;
+    }
+    return false;
+}
+
+// --- Frame phases -----------------------------------------------------------
+
 void Node::update(double delta_time) {
+    if (!is_active_in_tree()) return;
+    on_update(delta_time);
+}
+
+void Node::on_update(double delta_time) {
     const uint64_t my_id = instance_id_;
 
     if (script) script->on_process(delta_time);
@@ -343,12 +386,22 @@ void Node::update(double delta_time) {
 }
 
 void Node::update_layout(const Rect& parent_rect) {
+    if (!is_active_in_tree()) return;
+    on_update_layout(parent_rect);
+}
+
+void Node::on_update_layout(const Rect& parent_rect) {
     // Hands the rect straight to every child. A Control resolves itself first and
     // calls back in with its own rect.
     for_each_child([&parent_rect](Node* child) { child->update_layout(parent_rect); });
 }
 
 void Node::route_input(std::vector<InputEvent>& events) {
+    if (!is_active_in_tree()) return;
+    on_route_input(events);
+}
+
+void Node::on_route_input(std::vector<InputEvent>& events) {
     // Same guard as update(): a child may free itself while the walk holds a
     // pointer to it.
     const uint64_t my_id = instance_id_;
@@ -378,6 +431,11 @@ void Node::route_input(std::vector<InputEvent>& events) {
 }
 
 void Node::route_unhandled_input(const InputEvent& event) {
+    if (!is_active_in_tree()) return;
+    on_route_unhandled_input(event);
+}
+
+void Node::on_route_unhandled_input(const InputEvent& event) {
     if (script) script->on_unhandled_input(event);
 
     const uint64_t my_id = instance_id_;
@@ -387,6 +445,11 @@ void Node::route_unhandled_input(const InputEvent& event) {
 }
 
 void Node::draw(ConsoleRenderer& renderer, const Rect& clip) {
+    if (!is_active_in_tree()) return;
+    on_draw(renderer, clip);
+}
+
+void Node::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     // Only the children: a script has no drawing hook, so no user code runs that
     // could free this node mid-frame.
     for_each_child([&renderer, &clip](Node* child) { child->draw(renderer, clip); });

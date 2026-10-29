@@ -82,7 +82,7 @@ public:
     explicit LineEdit(const std::string& node_name = "Unnamed LineEdit",
                       Vec2 node_position = {0, 0});
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override;
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     // One text line plus the frame; never sized to the content, so it does not
     // wobble as you type.

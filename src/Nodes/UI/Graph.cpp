@@ -142,10 +142,10 @@ int Graph::filled_eighths(double value, double lo, double hi, int rows) {
 
 // --- Drawing ----------------------------------------------------------------
 
-void Graph::draw(ConsoleRenderer& renderer, const Rect& clip) {
+void Graph::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     const Rect area = get_rect();
     if (area.is_empty()) {
-        Control::draw(renderer, clip);
+        Control::on_draw(renderer, clip);
         return;
     }
 
@@ -183,7 +183,7 @@ void Graph::draw(ConsoleRenderer& renderer, const Rect& clip) {
         }
     }
 
-    Control::draw(renderer, clip);
+    Control::on_draw(renderer, clip);
 }
 
 } // namespace guayaba

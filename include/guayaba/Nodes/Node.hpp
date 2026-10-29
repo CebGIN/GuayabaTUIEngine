@@ -61,11 +61,29 @@ protected:
     virtual void enter_tree();
     virtual void exit_tree();
 
+    /*
+        Frame phases. The public update/update_layout/route_input/
+        route_unhandled_input/draw are non-virtual wrappers that check visibility
+        first; these hooks are what a subclass overrides. From an override, call
+        the base hook (Node::on_update, Control::on_draw, ...), never the wrapper:
+        the wrapper would check visibility again and dispatch back here.
+    */
+    virtual void on_update(double delta_time);
+    virtual void on_update_layout(const Rect& parent_rect);
+    virtual void on_route_input(std::vector<InputEvent>& events);
+    virtual void on_route_unhandled_input(const InputEvent& event);
+    virtual void on_draw(ConsoleRenderer& renderer, const Rect& clip);
+
+    // visible && every ancestor visible. What the wrappers test.
+    bool is_active_in_tree() const { return is_visible_in_tree(); }
+
     template<typename Fn>
     void for_each_child(Fn&& fn);
 
 private:
     uint64_t instance_id_ = detail::NodeRegistry::INVALID_ID;
+
+    bool visible_ = true;
 
     size_t child_index_ = SIZE_MAX;
 
@@ -166,17 +184,46 @@ public:
 
     bool is_in_tree() const { return in_tree; }
 
+    // --- Visibility ---------------------------------------------------------
+
+    /*
+        Hides or shows this subtree. A hidden node keeps its place in the tree -
+        name, path, signals, script and ownership - but the frame loop skips it:
+        no update, layout, input or draw. Containers do not reserve room for it
+        and FocusManager does not walk it.
+
+        Hiding releases the focus only when the focused control is inside this
+        subtree, and drops the cached rects so stale geometry is not hit-tested.
+        Showing invalidates them again; the next layout pass resolves the rects.
+    */
+    void set_visible(bool visible);
+
+    // This node's own flag, ignoring its ancestors.
+    bool is_visible() const { return visible_; }
+
+    // False when this node or any ancestor is hidden. A detached node counts as
+    // visible: it has no ancestors that could hide it.
+    bool is_visible_in_tree() const;
+
+    // True when `node` is this node or one of its descendants.
+    bool is_ancestor_of(const Node* node) const;
+
     // --- Behaviour ----------------------------------------------------------
 
-    virtual void update(double delta_time);
+    /*
+        The five frame phases below are non-virtual on purpose: the visibility
+        check lives in these wrappers, so no subclass can forget it. Override the
+        matching on_* hook instead.
+    */
+    void update(double delta_time);
 
     // --- Layout -------------------------------------------------------------
     // Once per frame, before draw(). Each node passes down the space its children
     // resolve against, so a Control measures against its nearest laid-out ancestor
     // without walking the tree. The base forwards parent_rect unchanged; a subclass
-    // that resolves itself first re-enters this virtual with its own rect (see
-    // Control::update_layout).
-    virtual void update_layout(const Rect& parent_rect);
+    // that resolves itself first re-enters this hook with its own rect (see
+    // Control::on_update_layout).
+    void update_layout(const Rect& parent_rect);
 
     /*
         Hands this subtree the frame's input events. Children are visited in reverse
@@ -185,13 +232,13 @@ public:
         control. The frame loop calls this after update_layout, so hit-tested rects
         are the ones about to be drawn.
     */
-    virtual void route_input(std::vector<InputEvent>& events);
+    void route_input(std::vector<InputEvent>& events);
 
     /*
         Delivers one unconsumed event to this subtree in forward order, calling this
         node's script on_unhandled_input. Not consumable.
     */
-    virtual void route_unhandled_input(const InputEvent& event);
+    void route_unhandled_input(const InputEvent& event);
 
     template<typename S, typename... Args>
     ScriptRef<typename S::node_type, S> attach_script(Args&&... args);
@@ -263,9 +310,9 @@ public:
 
     // clip is the region drawing is confined to, in buffer coordinates, passed down
     // to every child. A Control that clips narrows it by its own rect first (see
-    // Control::draw). Scripts have no drawing hook; overriding draw() is the only way
-    // to draw.
-    virtual void draw(ConsoleRenderer& renderer, const Rect& clip);
+    // Control::on_draw). Scripts have no drawing hook; overriding on_draw() is the
+    // only way to draw.
+    void draw(ConsoleRenderer& renderer, const Rect& clip);
 
     virtual void invalidate_cache_recursively();
 

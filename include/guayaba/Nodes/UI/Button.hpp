@@ -43,15 +43,15 @@ enum class TextAlign {
     StyleBox's frame, measured from raw_text alone, and is always on.
 
     A "pressed" look means the left button is held while the pointer is over the
-    Button; hover is read from Input in update(), since a Control only receives
+    Button; hover is read from Input in on_update(), since a Control only receives
     mouse events inside its rect. Activation - emitting "clicked" - happens in
     on_gui_input, so a press reaches exactly one control; Enter or Space while
     focused also activates. FocusMode defaults to CLICK.
 */
 class Button : public Control {
 protected:
-    // One box and one text colour per state. Non-normal boxes start empty; draw
-    // falls back to Normal.
+    // One box and one text colour per state. Non-normal boxes start empty;
+    // on_draw falls back to Normal.
     StyleBox styleboxes[4];
     uint16_t text_colors[4] = {7, 7, 7, 8}; // White; BRIGHT_BLACK when disabled
 
@@ -81,9 +81,9 @@ public:
     explicit Button(const std::string& node_name = "Unnamed Button",
                     Vec2 node_position = {0, 0});
 
-    void update(double delta_time) override;
+    void on_update(double delta_time) override;
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override;
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     Vec2 get_minimum_size() const override;
 

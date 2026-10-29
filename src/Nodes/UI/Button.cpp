@@ -17,12 +17,12 @@ Button::Button(const std::string& node_name, Vec2 node_position)
     set_focus_mode(FocusMode::CLICK);
 }
 
-void Button::update(double delta_time) {
+void Button::on_update(double delta_time) {
     // Hover is polled: the pointer leaving does not send this Button an event, so
     // the state must be read from Input. Activation is routed, in on_gui_input.
     hovered = is_inside(Input::mouse_pos);
 
-    Control::update(delta_time);
+    Node::on_update(delta_time);
 }
 
 bool Button::on_gui_input(const InputEvent& event) {
@@ -102,7 +102,7 @@ void Button::set_stylebox(ButtonState state, StyleBox new_stylebox) {
     wrapped_lines = wrap(raw_text, content_rect().size.x);
 }
 
-void Button::draw(ConsoleRenderer& renderer, const Rect& clip) {
+void Button::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     const ButtonState state = current_state();
     const StyleBox& box = styleboxes[static_cast<int>(state)];
     const Rect area = get_rect();
@@ -114,7 +114,7 @@ void Button::draw(ConsoleRenderer& renderer, const Rect& clip) {
 
     const Rect content = content_rect();
     if (content.is_empty()) {
-        Control::draw(renderer, clip);
+        Control::on_draw(renderer, clip);
         return;
     }
 
@@ -142,7 +142,7 @@ void Button::draw(ConsoleRenderer& renderer, const Rect& clip) {
 
     // Hand back to Control so the script hook runs and children use the clip
     // Control narrows for them.
-    Control::draw(renderer, clip);
+    Control::on_draw(renderer, clip);
 }
 
 } // namespace guayaba

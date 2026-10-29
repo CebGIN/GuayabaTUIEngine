@@ -15,6 +15,8 @@ Vec2 VBox::get_minimum_size() const {
     int cells = 0;
 
     for (const std::unique_ptr<Node>& child : children) {
+        if (!child->is_visible()) continue;
+
         const Control* as_control = dynamic_cast<const Control*>(child.get());
         if (as_control == nullptr) continue;
 
@@ -31,7 +33,7 @@ Vec2 VBox::get_minimum_size() const {
     return {std::max(own.x, width), std::max(own.y, height)};
 }
 
-void VBox::update_layout(const Rect& parent_rect) {
+void VBox::on_update_layout(const Rect& parent_rect) {
     resolve_rect(parent_rect);
 
     const Rect box = get_rect();
@@ -46,6 +48,8 @@ void VBox::update_layout(const Rect& parent_rect) {
     const int slack = std::max(0, box.size.y - block.size.y);
     int expanders = 0;
     for (const std::unique_ptr<Node>& child : children) {
+        if (!child->is_visible()) continue;
+
         const Control* as_control = dynamic_cast<const Control*>(child.get());
         if (as_control != nullptr && as_control->get_grow_y() == Grow::Both) ++expanders;
     }
@@ -64,6 +68,9 @@ void VBox::update_layout(const Rect& parent_rect) {
     int y = column_start;
     int expanders_seen = 0;
     for (size_t i = 0; i < children.size(); ++i) {
+        // A hidden child takes no cell and leaves no gap behind.
+        if (!children[i]->is_visible()) continue;
+
         const Control* as_control = dynamic_cast<const Control*>(children[i].get());
 
         int cell_height = block.size.y;

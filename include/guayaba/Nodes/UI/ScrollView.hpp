@@ -84,9 +84,9 @@ public:
     explicit ScrollView(const std::string& node_name = "Unnamed ScrollView",
                         Vec2 node_position = {0, 0});
 
-    void update(double delta_time) override;
+    void on_update(double delta_time) override;
 
-    void update_layout(const Rect& parent_rect) override;
+    void on_update_layout(const Rect& parent_rect) override;
 
     // A press on the handle starts the drag; while dragging this view captures
     // motion and release wherever the pointer is.
@@ -95,7 +95,7 @@ public:
 
     Vec2 get_minimum_size() const override;
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override;
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     // --- Scrolling ------------------------------------------------------------
 

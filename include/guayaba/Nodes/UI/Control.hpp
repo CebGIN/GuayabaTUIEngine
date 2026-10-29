@@ -29,7 +29,7 @@ class FocusManager;
     combinations; the ratios are the real state.
 
     Layout runs once per frame from SceneManager, before draw(). See
-    Node::update_layout.
+    Node::on_update_layout.
 */
 
 // Named anchor combinations written by set_anchor_preset() and read by
@@ -103,9 +103,9 @@ protected:
 public:
     Control(const std::string& node_name = "Unnamed Node", Vec2 node_position = {0, 0});
 
-    void update_layout(const Rect& parent_rect) override;
+    void on_update_layout(const Rect& parent_rect) override;
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override;
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     void invalidate_cache_recursively() override;
 
@@ -116,7 +116,7 @@ public:
         A consumed event is removed from the vector, stopping it reaching controls
         behind.
     */
-    void route_input(std::vector<InputEvent>& events) override;
+    void on_route_input(std::vector<InputEvent>& events) override;
 
     /*
         Whether this control is a candidate for the event: a mouse event when the

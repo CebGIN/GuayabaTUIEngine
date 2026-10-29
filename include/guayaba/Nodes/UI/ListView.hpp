@@ -43,7 +43,7 @@ public:
     explicit ListView(const std::string& node_name = "Unnamed ListView",
                       Vec2 node_position = {0, 0});
 
-    void draw(ConsoleRenderer& renderer, const Rect& clip) override;
+    void on_draw(ConsoleRenderer& renderer, const Rect& clip) override;
 
     // The caller's floor plus the frame, at least one row tall. The list scrolls
     // its items rather than growing to fit them.

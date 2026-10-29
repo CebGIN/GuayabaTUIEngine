@@ -247,13 +247,13 @@ void ListView::draw_row(ConsoleRenderer& renderer, const Rect& content, int row,
     }
 }
 
-void ListView::draw(ConsoleRenderer& renderer, const Rect& clip) {
+void ListView::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     // Drawn exactly as large as it is, clipped only by its ancestors.
     stylebox.apply(renderer, get_rect(), clip);
 
     const Rect content = content_rect();
     if (content.is_empty()) {
-        Control::draw(renderer, clip);
+        Control::on_draw(renderer, clip);
         return;
     }
 
@@ -281,7 +281,7 @@ void ListView::draw(ConsoleRenderer& renderer, const Rect& clip) {
 
     // Hand back to Control so the script hook runs and children use the clip
     // Control narrows for them.
-    Control::draw(renderer, clip);
+    Control::on_draw(renderer, clip);
 }
 
 } // namespace guayaba

@@ -45,9 +45,9 @@ Rect Label::text_clip(const Rect& incoming) const {
     return incoming.intersection(vertical_band);
 }
 
-void Label::update_layout(const Rect& parent_rect) {
+void Label::on_update_layout(const Rect& parent_rect) {
     // Anchors first: the wrap needs the width they produce.
-    Control::update_layout(parent_rect);
+    Control::on_update_layout(parent_rect);
 
     // A zero or negative width means no wrapping, which a collapsed label wants,
     // so it goes straight to wrap.
@@ -69,7 +69,7 @@ void Label::set_stylebox(StyleBox new_stylebox) {
     wrapped_lines = wrap(raw_text, content_rect().size.x);
 }
 
-void Label::draw(ConsoleRenderer& renderer, const Rect& clip) {
+void Label::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
     const Rect box = get_rect();
 
     // The box is clipped only by its ancestors, drawn exactly as large as it is.
@@ -83,7 +83,7 @@ void Label::draw(ConsoleRenderer& renderer, const Rect& clip) {
 
     // Hand back to Control so the script hook runs and children use the clip
     // Control narrows for them.
-    Control::draw(renderer, clip);
+    Control::on_draw(renderer, clip);
 }
 
 } // namespace guayaba

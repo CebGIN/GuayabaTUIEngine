@@ -57,7 +57,7 @@ public:
     explicit Container(const std::string& node_name = "Unnamed Container",
                        Vec2 node_position = {0, 0});
 
-    void update_layout(const Rect& parent_rect) override;
+    void on_update_layout(const Rect& parent_rect) override;
 
     Vec2 get_minimum_size() const override;
 

@@ -7,7 +7,8 @@ Node2D::Node2D(const std::string& node_name)
     : Node(node_name) {}
 
 void Node2D::invalidate_cache_recursively() {
-    if (!this->is_cached_position_valid) return;
+    // Always recurse, even when this node's own cache is already cold: a child may
+    // still hold a valid global position computed from the old one.
     this->is_cached_position_valid = false;
     Node::invalidate_cache_recursively();
 }

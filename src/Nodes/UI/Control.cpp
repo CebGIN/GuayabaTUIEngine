@@ -51,9 +51,9 @@ Control::Control(const std::string& node_name, Vec2 node_position)
 
 // --- Layout -----------------------------------------------------------------
 
-void Control::update_layout(const Rect& parent_rect) {
+void Control::on_update_layout(const Rect& parent_rect) {
     resolve_rect(parent_rect);
-    Node::update_layout(cached_rect);
+    Node::on_update_layout(cached_rect);
 }
 
 void Control::resolve_rect(const Rect& parent_rect) {
@@ -190,22 +190,22 @@ Rect Control::get_child_clip(const Rect& incoming_clip) const {
     return incoming_clip.intersection(cached_rect);
 }
 
-void Control::draw(ConsoleRenderer& renderer, const Rect& clip) {
-    // The narrowing goes to Node::draw for the children. Our own drawing keeps the
-    // clip we were given.
+void Control::on_draw(ConsoleRenderer& renderer, const Rect& clip) {
+    // The narrowing goes to Node::on_draw for the children. Our own drawing keeps
+    // the clip we were given.
     const Rect child_clip = get_child_clip(clip);
-    Node::draw(renderer, child_clip);
+    Node::on_draw(renderer, child_clip);
 }
 
 // --- Input ------------------------------------------------------------------
 
-void Control::route_input(std::vector<InputEvent>& events) {
+void Control::on_route_input(std::vector<InputEvent>& events) {
     const uint64_t my_id = instance_id();
     if (!detail::NodeRegistry::instance().is_live(my_id)) return;
 
     // Children in reverse, so a later sibling (drawn on top) gets first refusal.
-    // Done here rather than via Node::route_input, which would visit every subtree
-    // twice.
+    // Done here rather than via Node::on_route_input, which would visit every
+    // subtree twice.
     for (size_t i = children.size(); i > 0; --i) {
         if (i - 1 >= children.size()) continue;
         children[i - 1]->route_input(events);
@@ -274,6 +274,11 @@ bool Control::on_gui_input(const InputEvent& event) {
 
 void Control::grab_focus() {
     if (focus_mode == FocusMode::NONE) return;
+
+    // A hidden control is not focusable, whether Tab reached it or a caller asked
+    // for it by name.
+    if (!is_visible_in_tree()) return;
+
     FocusManager::get_instance().set_focused(this);
 }
 
