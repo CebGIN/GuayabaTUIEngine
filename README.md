@@ -376,7 +376,10 @@ tenga que acordarse de hacerlo.
   es un doble dueno, y ningun guard en este metodo lo haria seguro.
 - El nodo posee su script, y su referencia al nodo es un puntero normal: por eso no
   se puede formar un ciclo, y por eso `get_owner()` no necesita comprobar nada.
-- Si escribes un `Node` nuevo y sobrescribes `update` o `draw`, **termina llamando a  `Node::update(...)` / `Node::draw(...)`**. Si no, el script de ese tipo deja de dispararse sin avisar.
+- Si escribes un `Node` nuevo y sobrescribes `on_update` u `on_draw`, **termina llamando a
+  `Node::on_update(...)` / `Node::on_draw(...)`**. Si no, el script de ese tipo deja de
+  dispararse sin avisar. Y llama al hook, no al wrapper: el wrapper volveria a entrar en el
+  hook.
 
 ## Señales
 
@@ -547,16 +550,24 @@ estar ahi. Llama a `clear()` donde signifique algo.
 
 ### Señales que ya emite el motor
 
-`Button` declara `clicked` en su constructor y lo dispara en `update()`, en el frame en el que
-aprieta el raton sobre el. Esa señal es la unica via que tiene un boton: antes tambien aceptaba
-un `set_on_click`, y entonces decir "este boton hace algo" tenia dos respuestas distintas, de
-las que solo una podia usarse a la vez. Un boton con dos reactores es un boton con una señal y
-dos oyentes.
+`Button` declara `clicked` en su constructor y lo dispara desde `on_gui_input()`, en el frame
+en el que se aprieta el raton sobre el. Esa señal es la unica via que tiene un boton: antes
+tambien aceptaba un `set_on_click`, y entonces decir "este boton hace algo" tenia dos
+respuestas distintas, de las que solo una podia usarse a la vez. Un boton con dos reactores es
+un boton con una señal y dos oyentes.
 
 ```cpp
 // No hace falta guardar el handle al boton para oírlo.
 salir->connect_script_signal("clicked", this, &MiScript::salir);
 ```
+
+Los controles de esta version declaran ademas:
+
+| Control | Señal | Cuando |
+| --- | --- | --- |
+| `ProgressBar` | `value_changed(double)` | el valor efectivo cambia; repetir el mismo `set_value` no la emite |
+| `CheckBox` | `toggled(bool)` | el estado cambia, por clic, teclado o `set_checked` |
+| `Timer` | `timeout()` | se cumple un periodo; `get_ticks()` cuenta las emisiones |
 
 Y en el bus, desde `Input::refresh_input()`, que el bucle ya llama **antes** de
 `process_scene()`, asi que un reactor ve el evento en el mismo frame:
@@ -589,6 +600,12 @@ El orden del bucle es el contrato:
     route_input()    quien actua, contra esos rects
     process_scene()  logica por frame, viendo el resultado
     draw()           el dibujo
+
+`SceneManager::run_frame(renderer, events)` es ese cuerpo sin el terminal: aplica el cambio
+de escena pendiente, drena las llamadas diferidas, limpia el buffer, layouta, despacha la
+captura de raton, enruta, actualiza, dibuja y presenta. `start_running()` se queda con lo que
+necesita terminal: `refresh_input()`, el `resize` contra la pantalla real y el sleep de
+`target_fps`. Por eso un test puede empujar un frame entero sin abrir uno.
 
 `Node::route_input(events)` visita los hijos en **orden inverso** (el hermano que se dibuja
 encima tiene la primera opcion) y luego ofrece lo que queda a su script con `on_input`. Un
@@ -628,12 +645,109 @@ durante el resto del proceso: la propia guarda es la que lo hace silencioso. Con
 Y ojo con `clear_signals()`: suelta los reactores que escuchan a **este** nodo. No toca las
 conexiones que este nodo tenga en las senales de otros, que viven en la tabla de esos otros
 nodos. Para un teardown de escena, `SignalBus::clear()` es lo que baja todo.
-```
 
 `has_signal` no es decorativo: es lo que hace que un emisor builtin cueste una busqueda en
 un mapa en vez de una declaracion y una lista vacia de reactores. `clear_signals()` no lo
 llama nadie del motor; existe para el caso de un teardown de escena, donde quieres soltarlos
 antes de que nada mas empiece a emitir en la escena siguiente.
+
+## Visibilidad
+
+Cada nodo tiene un flag local, `visible`, que arranca en `true`:
+
+```cpp
+panel->set_visible(false);
+panel->is_visible();          // false: el flag de este nodo
+panel->is_visible_in_tree();  // false si el nodo O cualquier ancestro esta oculto
+```
+
+Ocultar un subarbol no lo saca del arbol: conserva nombre, ruta, señales, script y ownership.
+Lo que cambia es que el frame lo salta entero:
+
+- no ejecuta `update()` ni `Script::on_process()`;
+- no ejecuta `update_layout()`;
+- no recibe `route_input()` ni `route_unhandled_input()`;
+- no se dibuja;
+- no aporta al minimo de su contenedor;
+- no entra en el recorrido de foco de `FocusManager`.
+
+Si el foco estaba dentro del subarbol, se libera; el de un control de fuera no se toca. Lo
+mismo con la captura de raton. El rect anterior se invalida, asi que no se usa para
+hit-testing mientras esta oculto, y al volver a mostrarlo el siguiente layout lo recalcula.
+
+El corte vive en los **wrappers no virtuales** de `Node`, no en cada override:
+
+```cpp
+void Node::update(double dt) {
+    if (!is_active_in_tree()) return;
+    on_update(dt);
+}
+```
+
+Lo mismo con `update_layout`, `route_input`, `route_unhandled_input` y `draw`. Si vienes de
+una version anterior, tus subclases tienen que cambiar de nombre:
+
+| Antes | Ahora |
+| --- | --- |
+| `update(double)` | `on_update(double)` |
+| `update_layout(const Rect&)` | `on_update_layout(const Rect&)` |
+| `route_input(std::vector<InputEvent>&)` | `on_route_input(std::vector<InputEvent>&)` |
+| `route_unhandled_input(const InputEvent&)` | `on_route_unhandled_input(const InputEvent&)` |
+| `draw(ConsoleRenderer&, const Rect&)` | `on_draw(ConsoleRenderer&, const Rect&)` |
+
+Desde un hook, llama a la base (`Node::on_update`, `Control::on_draw`, ...), **nunca** al
+wrapper: el wrapper volveria a comprobar visibilidad y te devolveria al hook, en recursion.
+`enter_tree` y `exit_tree` siguen siendo virtuales y no cambian de significado.
+
+## Llamadas diferidas
+
+`SceneManager::call_deferred()` encola un `std::function<void()>` para el **principio del
+siguiente frame**, antes del layout:
+
+```cpp
+SceneManager::get_instance().call_deferred([ref] {
+    if (ref) ref->set_text("listo");
+});
+```
+
+- Es thread-safe: puedes llamarlo desde otro hilo.
+- Se ejecuta en FIFO, en el hilo del frame.
+- Una llamada encolada desde otra diferida corre al frame siguiente, no en el mismo drenado.
+- Si una lanza, las que quedan detras vuelven al frente de la cola y la excepcion se propaga.
+- Sin escena no se drena: las llamadas esperan a que haya una.
+- No se limpian al cambiar de escena. Captura por `NodeRef` o por id, nunca un `Node*` crudo.
+
+## Captura de raton
+
+`capture_mouse()` le da a un control los eventos de raton **aunque el puntero salga de su
+rect**. Es lo que necesita un arrastre (un divisor, un slider, el tirador de un scroll):
+
+```cpp
+bool MiControl::on_gui_input(const InputEvent& event) {
+    if (event.is_pressed() && event.mouse_button == MouseButton::LEFT) {
+        capture_mouse();
+        return true;
+    }
+    if (event.is_mouse_motion() && has_mouse_capture()) {
+        mover(event.mouse_pos);
+        return true;
+    }
+    if (event.is_released() && has_mouse_capture()) {
+        release_mouse();
+        return true;
+    }
+    return false;
+}
+```
+
+- Solo un control captura a la vez; `capture_mouse()` reemplaza al anterior.
+- Antes del recorrido normal, `Control::route_captured_input(events)` ofrece al capturador
+  `MOUSE_BUTTON`, `MOUSE_MOTION` y `MOUSE_WHEEL`, y borra los que consuma. Lo que rechace
+  sigue por el arbol.
+- Las teclas no pasan por la captura: siguen yendo al control con foco.
+- `can_receive_input()` devuelve `true` para raton mientras haya captura.
+- Se libera sola al destruir el control, al ocultarlo (a el o a un ancestro) y al cambiar de
+  escena. Un control oculto no puede capturar.
 
 ## Botones
 
@@ -717,6 +831,8 @@ Los cuatro:
 | `VBox` | Una celda por hijo, en columna; alturas se suman, la mas ancha manda |
 | `PanelContainer` | Estira el hijo dentro del marco y dibuja ese marco con un `StyleBox` |
 | `ScrollView` | Un `PanelContainer` cuyo contenido se desplaza arrastrando un tirador |
+| `GridContainer` | Una celda por hijo en una rejilla de N columnas; cada columna y fila mide el mayor minimo |
+| `MarginContainer` | Resta un margen por los cuatro lados y da el resto al hijo |
 
 `HBox` y `VBox` reparten una celda por hijo a lo largo de su eje: la celda es exactamente el
 minimo del hijo, y la separacion va entre celdas, nunca antes de la primera ni despues de la
@@ -749,6 +865,19 @@ misma zona y se pisarian.
 Un detalle que no es obvio: solo los hijos `Control` aportan a `get_minimum_size()`. Un
 `NodeTextMatrix` no tiene minimo que reportar, asi que no reserva sitio - pero si lo mueve el
 centrado, porque es un hijo mas.
+
+`GridContainer` coloca los hijos `Control` fila por fila, en el numero de columnas que fije
+`set_columns()` (cero o menos se normaliza a 1). Cada columna mide el mayor minimo de sus
+hijos y cada fila el mayor de los suyos, con `set_h_separation()`/`set_v_separation()` entre
+celdas. Si sobra sitio, solo crecen las columnas o filas que contengan un hijo `Grow::Both`
+en ese eje, a partes iguales y con el resto para la primera; el bloque se coloca con
+`content_alignment`. Los hijos que no son `Control` no entran en la rejilla: reciben el rect
+entero, como en un `Container`, y no aportan minimo.
+
+`MarginContainer` resta sus margenes al rect resuelto y entrega el resto a los hijos. Su
+minimo es el mayor minimo de los hijos mas los margenes; sin hijos, los margenes solos.
+`set_margins()` normaliza cada lado negativo a cero. No dibuja nada: el margen es espacio, no
+un marco.
 
 ### `fit_content`: que un Label reserve sitio para su texto
 
@@ -879,6 +1008,71 @@ sin esa captura, un arrastre rapido que se sale del raíl se quedaria parado.
 La rueda suma su delta al offset (con el signo cambiado: rueda arriba es ir hacia el principio).
 `scroll_by()` y `set_scroll_offset()` siguen ahi para moverlo por codigo.
 
+## Controles basicos
+
+### ProgressBar
+
+```cpp
+NodeRef<ProgressBar> barra = root->add_child<ProgressBar>("barra");
+barra->set_range(0, 100);
+barra->set_value(40);
+barra->set_show_percentage(true);
+barra->connect_signal<double>("value_changed", [](double nuevo) { /* ... */ });
+```
+
+`value` se acota a `[min, max]`; si `max <= min` el rango es degenerado y la barra se dibuja
+vacia. `value_changed` solo se emite cuando el valor efectivo cambia, asi que repetir el mismo
+`set_value` no dispara nada. La barra llena `floor(ancho * ratio)` celdas del content rect y
+centra encima el texto: el de `set_text()` si lo hay, si no el porcentaje cuando
+`show_percentage` esta activo.
+
+En modo indeterminado (`set_indeterminate(true)`) el valor se ignora: un bloque del 25% del
+ancho, con un minimo de una celda, se pasea de izquierda a derecha en bucle. La posicion sale
+de una fase acumulada, no de avanzar un paso por frame, asi que un delta irregular no acumula
+deriva.
+
+### Spinner
+
+```cpp
+NodeRef<Spinner> spinner = root->add_child<Spinner>("spinner");
+spinner->set_interval(0.1);
+```
+
+Avanza `floor(acumulado / intervalo)` frames por update, asi que un delta grande no pierde
+vueltas. Parado (`stop()`) sigue dibujando el frame actual sin avanzar; con `frames` vacio no
+dibuja nada. `interval <= 0` vuelve a 0.1 s. Los frames por defecto son barra vertical, barra
+inclinada, guion y barra invertida.
+
+### CheckBox
+
+```cpp
+NodeRef<CheckBox> aceptar = root->add_child<CheckBox>("aceptar");
+aceptar->set_text("Aceptar");
+aceptar->connect_signal<bool>("toggled", [](bool activo) { /* ... */ });
+```
+
+Dibuja `[x] texto` o `[ ] texto`. El indicador ocupa tres columnas; el espacio antes del texto
+solo existe si hay texto, asi que el minimo es 3 sin texto y 4 mas el ancho del texto con el.
+Un clic izquierdo, o Space/Enter con foco, alternan el estado. `toggled(bool)` solo se emite al
+cambiar. Los glifos se cambian con `set_glyphs()`; uno que no sea una celda imprimible lanza
+`std::invalid_argument`.
+
+### Timer
+
+```cpp
+NodeRef<Timer> timer = root->add_child<Timer>("timer");
+timer->set_wait_time(0.5);
+timer->set_one_shot(true);
+timer->connect_signal<>("timeout", [] { /* ... */ });
+timer->start();
+```
+
+Es un `Node`, no un `Control`: no se dibuja ni recibe entrada. Acumula el delta mientras corre
+y emite `timeout()` al cumplir el periodo; en one-shot se para, en repetitivo sigue y
+`get_ticks()` cuenta cada emision. `start()` reinicia el periodo pero **no** los ticks.
+`get_time_left()` devuelve el restante congelado cuando esta parado. `wait_time <= 0` se
+normaliza a 0.001 s. Un timer oculto no avanza.
+
 ## Integracion CMake
 
 El motor es una libreria estatica que no depende de nada externo. Tres modos de consumo:
@@ -917,9 +1111,10 @@ include/guayaba/     API publica. Ninguna cabecera de plataforma es alcanzable d
                      ScriptRef, Signal, SignalBus, NodeRef, NodeRegistry
   Terminal/          IOSTerminal (interfaz abstracta) + create_system_terminal()
   Renderer/          ConsoleRenderer
-  Nodes/             Node, Node2D, NodeTextMatrix
-    UI/              Control, Label, Button, Container,
-                     HBox, VBox, PanelContainer, ScrollView
+  Nodes/             Node, Node2D, NodeTextMatrix, Timer
+    UI/              Control, Label, Button, CheckBox, ProgressBar, Spinner,
+                     Container, HBox, VBox, GridContainer, MarginContainer,
+                     PanelContainer, ScrollView
   Scene/             SceneManager
 src/                 Implementaciones. Privado, no se instala.
   Core/              NodeRegistry, Signal, SignalBus,
