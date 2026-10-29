@@ -9,9 +9,8 @@ namespace guayaba {
 
 namespace {
 
-// Handle glyphs, as a track and a thumb drawn with fill_rect so the handle reads
-// as solid rather than as an outline of a character cell. A vertical bar rather
-// than a square, because the track is one column wide and has to.
+// Track and thumb glyphs, filled so the handle reads as solid. A vertical bar
+// because the track is one column wide.
 constexpr wchar_t TRACK_CHAR = L'│';
 constexpr wchar_t HANDLE_CHAR = L'█';
 
@@ -19,21 +18,13 @@ constexpr wchar_t HANDLE_CHAR = L'█';
 
 ScrollView::ScrollView(const std::string& node_name, Vec2 node_position)
     : PanelContainer(node_name, node_position) {
-    // Always on, and not a preference: a scroll view whose content is allowed to
-    // paint past its own frame is not scrolling anything, it is just an offset
-    // with the edges left off. This is the one clip_children consumer in the tree
-    // that cannot be switched off, which is why it is set here rather than
-    // exposed as an option.
+    // Always on: a scroll view whose content paints past its frame is not scrolling
+    // anything. Not exposed as an option.
     set_clip_children(true);
 
-    // Defaults that read as a scrollbar without being asked for: a dark rail and
-    // a light handle, the two extremes the palette actually offers. Both are
-    // overridable through the setters, and both are left without a border so a
-    // caller adding one is not fighting a default.
-    //
-    // BLACK and WHITE rather than the bright variants because there is no
-    // BRIGHT_BLACK: the 8 bright slots are bright versions of the first seven
-    // plus bright white, so there is no dark grey to ask for.
+    // Defaults that read as a scrollbar: a dark rail and a light handle. Both are
+    // overridable through the setters. BLACK and WHITE because there is no
+    // BRIGHT_BLACK.
     track_stylebox.set_background_color(Color::from_name(Color::BLACK));
     handle_stylebox.set_background_color(Color::from_name(Color::WHITE));
 }
@@ -66,10 +57,8 @@ Rect ScrollView::handle_rect() const {
     const Rect track = track_rect();
     if (track.is_empty()) return track;
 
-    // Proportional: the handle takes as much of the track as the viewport takes
-    // of the content, so a view half as tall as its content has a half-height
-    // handle. Rounded to at least one cell, since a handle with no height cannot
-    // be seen or grabbed.
+    // The handle takes as much of the track as the viewport takes of the content,
+    // at least one cell tall.
     const int viewport_height = viewport_rect().size.y;
     const int content_height = content_extent().y;
 
@@ -81,7 +70,7 @@ Rect ScrollView::handle_rect() const {
     }
 
     // Positioned by where the offset sits in the scrollable range, so the handle
-    // travels the full track as the content travels its full extent.
+    // travels the full track.
     const int travel = track.size.y - handle_height;
     const int limit = max_scroll_offset();
     const int moved = (limit > 0) ? (scroll_offset.y * travel / limit) : 0;
@@ -93,11 +82,8 @@ Rect ScrollView::handle_rect() const {
 }
 
 void ScrollView::set_scroll_offset(Vec2 new_offset) {
-    // Horizontal scrolling is not offered: a horizontal track needs a second
-    // handle and a second range, and nothing in the tree wraps in a way that
-    // would want it. The x is carried through unchanged rather than clamped so
-    // a caller setting a whole offset does not have to remember which half is
-    // live - get_scroll_offset() reads back exactly what was put in.
+    // Only y scrolls. x is carried through unchanged rather than clamped, so
+    // get_scroll_offset() reads back exactly what was put in.
     scroll_offset = Vec2{new_offset.x, std::clamp(new_offset.y, 0, max_scroll_offset())};
 
     if (max_scroll_offset() == 0) dragging = false;
@@ -112,16 +98,10 @@ void ScrollView::scroll_to_bottom() {
 }
 
 Vec2 ScrollView::get_minimum_size() const {
-    // Deliberately NOT PanelContainer's minimum, which adds the content's own
-    // minimum to the frame. That is right for a panel - a panel is sized by what
-    // is in it - and exactly wrong here: a view whose minimum included its
-    // content could never be smaller than its content, so it could never have
-    // anything to scroll to, and it would grow to fit instead. The whole point
-    // of the node is that the content is taller than the view.
-    //
-    // So the floor is only the frame and the track column. What the view is
-    // actually tall comes from its size, its anchors, or whatever the parent
-    // imposes - and the content overflows that on purpose.
+    // Not PanelContainer's minimum, which would add the content's own minimum: a
+    // view that could never be smaller than its content could never scroll. The
+    // floor is only the frame and the track column; the height comes from the
+    // size, anchors or parent.
     const Vec2 frame = stylebox.get_frame_size();
     const Vec2 own = Control::get_minimum_size();
 
@@ -129,8 +109,7 @@ Vec2 ScrollView::get_minimum_size() const {
 }
 
 void ScrollView::update(double delta_time) {
-    // No input here: the drag and the wheel arrive through on_gui_input. Only the
-    // visual/layout side is left to update().
+    // Input arrives through on_gui_input; only the visual/layout side is left here.
     PanelContainer::update(delta_time);
 }
 
@@ -160,7 +139,7 @@ bool ScrollView::on_gui_input(const InputEvent& event) {
 
     if (event.type == InputEvent::Type::MOUSE_WHEEL) {
         if (!has_overflow()) return false;
-        // Positive wheel is up, which scrolls toward the top (a smaller offset).
+        // Positive wheel is up, which scrolls toward the top.
         scroll_by(Vec2{0, -event.wheel_delta});
         return true;
     }
@@ -168,17 +147,16 @@ bool ScrollView::on_gui_input(const InputEvent& event) {
     if (event.type == InputEvent::Type::MOUSE_BUTTON) {
         if (event.pressed && event.mouse_button == MouseButton::LEFT) {
             if (!track.is_empty() && handle.contains(event.mouse_pos)) {
-                // Grabbed, not jumped to: the pointer stays the same distance
-                // from the handle's top, so the content under the cursor keeps
-                // the cursor.
+                // Grabbed, not jumped to: the pointer keeps the same distance from
+                // the handle's top.
                 dragging = true;
                 grab_offset = event.mouse_pos.y - handle.pos.y;
                 return true;
             }
         } else if (!event.pressed && event.mouse_button == MouseButton::LEFT &&
                    dragging) {
-            // The drag ends on release wherever the pointer is, rather than by
-            // hit-testing the track: a fast drag can leave the track entirely.
+            // The drag ends on release wherever the pointer is; a fast drag can
+            // leave the track.
             dragging = false;
             return true;
         }
@@ -188,8 +166,7 @@ bool ScrollView::on_gui_input(const InputEvent& event) {
         const int travel = std::max(0, track.size.y - handle.size.y);
         const int from_track_top = event.mouse_pos.y - track.pos.y - grab_offset;
 
-        // Empty range means there is nothing to scroll to, so the offset is left
-        // alone rather than divided by zero or snapped to the end.
+        // An empty range means nothing to scroll to, so leave the offset alone.
         if (travel > 0 && max_scroll_offset() > 0) {
             const int moved = std::clamp(from_track_top, 0, travel);
             set_scroll_offset(Vec2{scroll_offset.x,
@@ -203,28 +180,21 @@ bool ScrollView::on_gui_input(const InputEvent& event) {
 }
 
 void ScrollView::update_layout(const Rect& parent_rect) {
-    // resolve_rect and then the viewport offset - never Control::update_layout -
-    // because the child's rect has to move by the scroll offset while its size
-    // stays the panel's content rect.
+    // resolve_rect then the viewport offset, not Control::update_layout: the
+    // child's rect moves by the scroll offset while its size stays the content
+    // rect.
     resolve_rect(parent_rect);
 
-    // Clamped every pass, not only when someone calls set_scroll_offset, because
-    // the content can grow under a fixed offset: a Label set to more lines, or a
-    // child added to a VBox, both make a resting offset no longer the end.
+    // Clamped every pass: the content can grow under a fixed offset, leaving it
+    // past the end.
     scroll_offset.y = std::clamp(scroll_offset.y, 0, max_scroll_offset());
     if (max_scroll_offset() == 0) dragging = false;
 
     const Rect viewport = viewport_rect();
 
-    // The scroll offset is baked into the rect handed to the child, and
-    // place_child assigns that rect's position outright every pass rather than
-    // shifting by a delta. That is what keeps a scroll view from drifting: there
-    // is no running total to forget to take back, so a change of offset, a
-    // reorder or a resize all leave the child exactly where this put it.
-    //
-    // Only the position moves. The size is the viewport's own, which is what the
-    // child fills - so a Label keeps wrapping to the width it can actually show
-    // while its top edge slides up out of sight.
+    // The offset is baked into the rect handed to the child, which place_child
+    // assigns outright, so nothing drifts. Only the position moves; the size is
+    // the viewport's own.
     const Rect scrolled{
         Vec2{viewport.pos.x, viewport.pos.y - scroll_offset.y},
         viewport.size,
@@ -235,15 +205,13 @@ void ScrollView::update_layout(const Rect& parent_rect) {
 void ScrollView::draw(ConsoleRenderer& renderer, const Rect& clip) {
     stylebox.apply(renderer, get_rect(), clip);
 
-    // Drawn only when there is something to scroll. The reserved column stays
-    // reserved either way, since get_minimum_size cannot ask the content how tall
-    // it is, so an unscrollable view shows a blank column rather than a handle
-    // that goes nowhere.
+    // Drawn only when there is something to scroll; the reserved column stays
+    // reserved either way, so an unscrollable view shows a blank column.
     if (has_overflow()) {
         const Rect track = track_rect();
 
-        // The track is outside the panel's own rect, so it is clipped by the
-        // ancestors' clip only. Narrowing it to the frame would cut it off.
+        // The track is outside the panel's rect, so only the ancestors' clip
+        // applies.
         if (track_stylebox.has_background() || track_stylebox.has_border()) {
             track_stylebox.apply(renderer, track, clip);
         } else {
@@ -260,10 +228,8 @@ void ScrollView::draw(ConsoleRenderer& renderer, const Rect& clip) {
     }
 
     // Handed the viewport rather than letting Control narrow to get_rect(): the
-    // handle is drawn outside get_rect(), and Control's narrowing is what decides
-    // what the children may paint over. The viewport is the stricter of the two -
-    // it is get_rect() less the border and margins - so the content stops at the
-    // panel's edge while the track, which lives out there, is already drawn.
+    // handle is drawn outside get_rect(). The viewport is get_rect() less the
+    // border and margins, so the content stops at the panel's edge.
     Node::draw(renderer, viewport_rect().intersection(clip));
 }
 

@@ -10,8 +10,7 @@ namespace guayaba {
 
 Button::Button(const std::string& node_name, Vec2 node_position)
     : Control(node_name, node_position) {
-    // Declared here rather than on demand at the emit, so connect_signal finds
-    // it and so is the one signal a Button is known to have.
+    // Declared here so connect_signal finds it.
     declare_signal("clicked");
 
     // Reachable by keyboard: clicking focuses it, and Tab reaches it.
@@ -19,10 +18,8 @@ Button::Button(const std::string& node_name, Vec2 node_position)
 }
 
 void Button::update(double delta_time) {
-    // Hover is polled, not event-driven: the pointer leaving this Button does not
-    // send it an event (events go to whatever is under the pointer), so the state
-    // has to be read from Input to clear. Activation is the routed part, in
-    // on_gui_input.
+    // Hover is polled: the pointer leaving does not send this Button an event, so
+    // the state must be read from Input. Activation is routed, in on_gui_input.
     hovered = is_inside(Input::mouse_pos);
 
     Control::update(delta_time);
@@ -47,8 +44,7 @@ bool Button::on_gui_input(const InputEvent& event) {
 }
 
 ButtonState Button::current_state() const {
-    // Precedence, not iteration order: a disabled Button stays visibly disabled
-    // even while the pointer is over it and held.
+    // Precedence, not iteration order: Disabled beats Pressed beats Hover.
     if (disabled) return ButtonState::Disabled;
     if (hovered && Input::l_click) return ButtonState::Pressed;
     if (hovered) return ButtonState::Hover;
@@ -58,8 +54,8 @@ ButtonState Button::current_state() const {
 Rect Button::content_rect() const {
     const ButtonState state = current_state();
 
-    // Fall back to the normal box when this state has none of its own, so an
-    // unconfigured hover does not make the text jump to a different place.
+    // Fall back to the normal box when this state has none, so an unconfigured
+    // hover does not move the text.
     const StyleBox& box = styleboxes[static_cast<int>(state)].has_background() ||
                                   styleboxes[static_cast<int>(state)].has_border()
                               ? styleboxes[static_cast<int>(state)]
@@ -71,9 +67,8 @@ Rect Button::content_rect() const {
 Rect Button::text_clip(const Rect& incoming) const {
     if (!get_clip_children()) return incoming;
 
-    // Same split Label makes: the text cannot paint over this Button's own bottom
-    // border, but a too-wide line spills sideways and is cut by the nearest
-    // clipping ancestor.
+    // The text cannot paint over this Button's bottom border, but a too-wide line
+    // spills sideways and is cut by the nearest clipping ancestor.
     const Rect content = content_rect();
     const Rect band{Vec2{incoming.left(), content.top()},
                     Vec2{incoming.size.x, content.size.y}};
@@ -81,24 +76,23 @@ Rect Button::text_clip(const Rect& incoming) const {
 }
 
 Vec2 Button::get_minimum_size() const {
-    // Always on: a Button laid out narrower than its own label would clip the
-    // text it exists to show, which is the one thing a Button cannot do.
+    // Always on: a Button narrower than its label would clip the text it exists to
+    // show.
     const Vec2 text = guayaba::measure_text(raw_text);
 
-    // The normal box's frame, not the current state's: the minimum has to be the
-    // same whatever the pointer is doing, or a button would resize under the
-    // cursor as it hovered.
+    // The normal box's frame, not the current state's, so a button does not resize
+    // under a hovering cursor.
     const Vec2 frame = styleboxes[static_cast<int>(ButtonState::Normal)].get_frame_size();
 
-    // The caller's own minimum still floors it - neither can shrink the other.
+    // The caller's own minimum still floors it.
     const Vec2 own = Control::get_minimum_size();
     return {std::max(own.x, text.x + frame.x), std::max(own.y, text.y + frame.y)};
 }
 
 void Button::set_text(const std::string& text) {
     raw_text = text;
-    // Re-wrap now rather than leaving it stale until the next layout pass, so a
-    // set_text followed by a draw in the same frame shows the new text.
+    // Re-wrap now, so a set_text followed by a draw in the same frame shows the
+    // new text.
     wrapped_lines = wrap(raw_text, content_rect().size.x);
 }
 
@@ -113,9 +107,7 @@ void Button::draw(ConsoleRenderer& renderer, const Rect& clip) {
     const StyleBox& box = styleboxes[static_cast<int>(state)];
     const Rect area = get_rect();
 
-    // The Button itself is drawn exactly as large as it is and is clipped only by
-    // what its ancestors allowed: clip_children governs what this node contains,
-    // not whether the node itself is visible.
+    // Drawn exactly as large as it is, clipped only by its ancestors.
     if (box.has_background() || box.has_border()) {
         box.apply(renderer, area, clip);
     }
@@ -126,14 +118,13 @@ void Button::draw(ConsoleRenderer& renderer, const Rect& clip) {
         return;
     }
 
-    // The text takes the same background apply() just filled with, so a banded
-    // button shows no holes; a state without one keeps the old transparent text.
+    // The text takes the background apply() just filled with, so a banded button
+    // shows no holes.
     const uint16_t bg = box.has_background() ? *box.get_background_color() : 0;
 
-    // Alignment slides the whole block of lines sideways inside the content rect.
-    // The widest line decides, so every line stays flush with the same block edge;
-    // text wider than the content is left where it is and clipped, never pushed
-    // further out of view.
+    // Alignment slides the whole block sideways; the widest line decides, so every
+    // line stays flush with the same edge. Text wider than the content is left
+    // where it is.
     int text_x = content.pos.x;
     if (text_align != TextAlign::Left) {
         int widest = 0;
@@ -149,8 +140,8 @@ void Button::draw(ConsoleRenderer& renderer, const Rect& clip) {
     renderer.put_text({text_x, content.pos.y}, wrapped_lines,
                       text_colors[static_cast<int>(state)], bg, text_clip(clip));
 
-    // Hand back to Control so the script hook still runs and children are drawn
-    // with the clip Control narrows for them.
+    // Hand back to Control so the script hook runs and children use the clip
+    // Control narrows for them.
     Control::draw(renderer, clip);
 }
 

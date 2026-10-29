@@ -18,20 +18,13 @@ bool r_click_just_pressed = false;
 
 namespace {
 
-// The pointer position at the previous refresh, so mouse_moved means "the pointer
-// went somewhere" rather than "a frame happened". File-local on purpose: nothing
-// outside refresh_input() may read it.
-//
-// The first refresh only records the position, and emits nothing. There is no
-// "previous" to compare against yet, so emitting would be reporting a movement
-// that never happened - and the first thing a listener does with a mouse position
-// is usually something visible.
+// The position at the previous refresh, so mouse_moved reports a real move. The
+// first refresh only records the position and emits nothing.
 Vec2 previous_mouse_pos = {0, 0};
 bool has_previous_mouse = false;
 
-// This frame's events, waiting to be drained. Held here rather than taken
-// straight from the terminal so refresh_input can emit "input" for each of them
-// before the tree walk gets a chance to consume one.
+// This frame's events, waiting to be drained. Held here so refresh_input can emit
+// "input" for each before the tree walk consumes it.
 std::vector<InputEvent> frame_events;
 
 } // namespace
@@ -55,32 +48,19 @@ void refresh_input() {
 
     mouse_pos = g_terminal->get_mouse_position();
 
-    // Taken from the terminal before anything can react, so a reactor that drains
-    // gets the same frame's events the tree walk will.
+    // Taken now so a draining reactor gets the same events the tree walk will.
     frame_events = g_terminal->take_input_events();
 
-    // Emitted from here, which the frame loop already calls before process_scene():
-    // a reactor therefore sees the click in the same frame the scripts update in.
-    //
-    // Both are on the bus rather than on a node because the terminal is not a node.
-    // Both are checked at the connect call even though the bus erases the arguments:
-    // a reactor for "mouse_clicked" has to take (int, Vec2).
-    //
-    // The guard is is_declared and NOT has_signal<int, Vec2>(...). is_declared
-    // ignores the signature, which is what an emitter needs: has_signal is also
-    // false when the name exists with a different signature, and using that as an
-    // emit guard would turn one wrong guess at connect time into a signal that
-    // silently stops firing for the rest of the process. With is_declared, a
-    // mismatched reactor gets the throw from emit_signal instead of the quiet.
+    // Emitted before process_scene(), so a reactor sees the click in the same
+    // frame the scripts update in. The guard is is_declared, not
+    // has_signal<int, Vec2>: is_declared ignores the signature, so a mismatch
+    // throws from emit_signal instead of silently never firing.
     SignalBus& bus = SignalBus::get_instance();
 
-    // At most one per frame, and left wins if both somehow register on the same
-    // poll: the terminal reports two booleans, not a queue of events.
+    // At most one per frame; left wins if both register on the same poll.
     if ((l_click_just_pressed || r_click_just_pressed)
         && bus.is_declared("mouse_clicked")) {
-        // 1 and 2 rather than an enum: a reactor can compare them without this
-        // header, and a mouse with a middle button can be added later without
-        // renumbering.
+        // 1 and 2 rather than an enum, so a reactor can compare without this header.
         bus.emit_signal("mouse_clicked", l_click_just_pressed ? 1 : 2, mouse_pos);
     }
 
@@ -92,10 +72,8 @@ void refresh_input() {
     previous_mouse_pos = mouse_pos;
     has_previous_mouse = true;
 
-    // Every event, not just the summary the two signals above provide. Emitted
-    // before routing so an observer sees the same ordering the controls will, and
-    // so a reactor cannot starve a control of an event - this loop holds its own
-    // copy of each event.
+    // Every event, emitted before routing so an observer sees the same order the
+    // controls will.
     if (bus.is_declared("input")) {
         for (const InputEvent& event : frame_events) {
             bus.emit_signal("input", event);
@@ -104,8 +82,7 @@ void refresh_input() {
 }
 
 std::vector<InputEvent> drain_input_events() {
-    // Moved out rather than copied: the caller gets this frame's events and this
-    // namespace keeps an empty vector, so two drains cannot both act on one click.
+    // Swapped out so the caller takes the events and this namespace keeps none.
     std::vector<InputEvent> drained;
     drained.swap(frame_events);
     return drained;

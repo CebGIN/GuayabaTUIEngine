@@ -6,20 +6,15 @@
 
 namespace guayaba {
 
-// Decodes the UTF-8 codepoint that starts at byte `index` in `value`, writing it
-// to `codepoint` and returning how many bytes it spans.
+// Decodes the UTF-8 codepoint starting at byte `index` in `value`, writing it to
+// `codepoint` and returning how many bytes it spans.
 //
-// A truncated or malformed sequence is reported as a single byte (the lead byte,
-// taken as-is), so a bad string still draws one cell instead of derailing the
-// rest of the line. Callers advance by the returned length, so a malformed byte
-// can never walk them off the end of the string.
+// A truncated or malformed sequence is reported as one byte (the lead byte taken
+// as-is), so a bad string still draws one cell. Callers advance by the returned
+// length, so a malformed byte cannot walk them off the end.
 //
-// The engine's grid is monospace: one codepoint is one cell, whatever its UTF-8
-// length. Every place that walks text - the renderer, the wrapping, and the list
-// and field controls - has to agree on these boundaries, so the decoder lives
-// here rather than being copied into each translation unit. Measuring or drawing
-// by byte instead is what punches holes into any line holding an accent, an
-// arrow or a box glyph.
+// The grid is monospace: one codepoint is one cell whatever its UTF-8 length, so
+// every place that walks text uses this decoder rather than measuring by byte.
 inline std::size_t decode_utf8(const std::string& value, std::size_t index,
                                char32_t& codepoint) {
     const unsigned char lead = static_cast<unsigned char>(value[index]);

@@ -13,14 +13,9 @@
 
 namespace guayaba {
 
-// The four looks a Button can be in. Exactly one is current at a time, picked in
-// this order of precedence - Disabled beats Pressed beats Hover - so a disabled
-// button cannot flash the pressed look just because the mouse happens to be
-// held over it.
-//
-// Normal is the resting state and the only one a Button really needs: the others
-// fall back to it, so a Button with three boxes left at their defaults still
-// draws and still hovers.
+// The four looks a Button can be in, picked in this order of precedence: Disabled
+// beats Pressed beats Hover. Normal is the resting state and the fallback for the
+// others.
 enum class ButtonState {
     Normal,
     Hover,
@@ -28,11 +23,8 @@ enum class ButtonState {
     Disabled,
 };
 
-// Where the text sits horizontally inside the content rect. Left is the default
-// and the historical behaviour - a Button is dragged into a wider cell than it
-// asked for often enough (a table header filling its column, say) that centring
-// it in that cell is worth naming. The lines of a wrapped label move together as
-// one block, the same way Container alignment moves a block.
+// Where the text sits horizontally inside the content rect. Left is the default.
+// The lines of a wrapped label move together as one block.
 enum class TextAlign {
     Left,
     Center,
@@ -42,48 +34,24 @@ enum class TextAlign {
 /*
     A Control that shows text inside a StyleBox and reacts to a left click.
 
-    It is a Label that is also clickable: same text handling, same wrapping, and
-    a minimum size that always fits what it says.
-
         +---------------------------+
         |          Click me         |
         +---------------------------+
 
-    Each state carries its own StyleBox and its own text color, so a hover can be
-    a different background rather than a foreground/background swap. Draw picks
-    the current one; there is no "theme" object, because nothing else in the
-    engine has one yet and inventing it here would be a layer with a single user.
+    Each state (ButtonState) carries its own StyleBox and text colour; draw picks
+    the current one. The minimum size is the text's own extent plus the normal
+    StyleBox's frame, measured from raw_text alone, and is always on.
 
-    SIZE
-    The minimum is the text's own extent plus the normal StyleBox's frame, and it
-    is always on - a Button with no minimum could be laid out narrower than its
-    own label and clip the text it exists to show. As with every Control this is
-    a floor, not a target: set_size(), FullRect and the anchors still decide how
-    big the Button actually gets, and a button in a wide cell is drawn wide.
-
-    Measured from raw_text alone, so the answer does not depend on the size the
-    layout handed out. See TextWrap::measure_text.
-
-    PRESSING AND ACTIVATION
-    "Pressed" (the visual state) means the left button is held while the pointer
-    is over this Button; the hover state is still read from Input in update(),
-    because a Control only receives a mouse event when the pointer is inside it
-    and so cannot clear hover on the way out.
-
-    The ACTIVATION - emitting "clicked" - happens in on_gui_input, so a press
-    reaches exactly one control through routing. A Button also activates on
-    Enter or Space while it holds the focus, which is what makes it keyboard
-    reachable; its FocusMode defaults to CLICK.
-
-    "clicked" is a signal, declared in the constructor and the only way to say
-    what a Button does. There is deliberately no set_on_click: two callbacks
-    where only one can be installed is one callback too many.
+    A "pressed" look means the left button is held while the pointer is over the
+    Button; hover is read from Input in update(), since a Control only receives
+    mouse events inside its rect. Activation - emitting "clicked" - happens in
+    on_gui_input, so a press reaches exactly one control; Enter or Space while
+    focused also activates. FocusMode defaults to CLICK.
 */
 class Button : public Control {
 protected:
-    // One box and one text color per state. The three non-normal boxes start out
-    // empty, and draw falls back to Normal when the current state has no box of
-    // its own, so they cost nothing until they are configured.
+    // One box and one text colour per state. Non-normal boxes start empty; draw
+    // falls back to Normal.
     StyleBox styleboxes[4];
     uint16_t text_colors[4] = {7, 7, 7, 8}; // White; BRIGHT_BLACK when disabled
 
@@ -95,17 +63,15 @@ protected:
     bool hovered = false;
     bool disabled = false;
 
-    // The state draw() and the frame's behaviour should agree on, rather than
-    // each picking its own precedence rule.
+    // The state draw() and the behaviour agree on.
     ButtonState current_state() const;
 
-    // Where the text goes: the current state's box, minus its border and
-    // margins. Empty when the box is too small to hold anything.
+    // The current state's box minus its border and margins; empty when too small.
     Rect content_rect() const;
 
-    // The area the text is drawn into, narrowed to the current state's content
-    // rect when the Button clips. Horizontal overflow is left to an ancestor and
-    // vertical overflow is cut here, at the Button's own bottom.
+    // The area the text is drawn into: the current state's content rect when the
+    // Button clips. Horizontal overflow is left to an ancestor, vertical is cut at
+    // the Button's bottom.
     Rect text_clip(const Rect& incoming) const;
 
     // Activation: a left press inside the Button, or Enter/Space while focused.
@@ -130,14 +96,13 @@ public:
 
     bool is_disabled() const { return disabled; }
 
-    // A disabled Button ignores clicks and always draws as Disabled. Hover state
-    // is still tracked underneath so it comes back correct when re-enabled.
+    // A disabled Button ignores clicks and always draws as Disabled. Hover is
+    // still tracked underneath.
     void set_disabled(bool is_disabled) { disabled = is_disabled; }
 
     // --- Text ---------------------------------------------------------------
 
-    // Re-wraps against the current content width, so a change here is visible
-    // this frame without waiting for the next layout pass.
+    // Re-wraps against the current content width immediately.
     void set_text(const std::string& text);
 
     const std::string& get_text() const { return raw_text; }
@@ -145,8 +110,8 @@ public:
     // The lines as last wrapped. Derived state; set raw_text through set_text().
     const std::vector<std::string>& get_wrapped_lines() const { return wrapped_lines; }
 
-    // Where the text sits in the content rect. Left by default; Center or Right
-    // only moves it, they do not change the wrap or the minimum size.
+    // Where the text sits in the content rect. Center or Right only moves it; the
+    // wrap and minimum size are unchanged.
     TextAlign get_text_align() const { return text_align; }
     void set_text_align(TextAlign alignment) { text_align = alignment; }
 
@@ -157,8 +122,7 @@ public:
         return styleboxes[static_cast<int>(state)];
     }
 
-    // A box change can move the content rect, so the wrap and the cached minimum
-    // are both recomputed rather than left stale.
+    // A box change moves the content rect, so the wrap and cached minimum are recomputed.
     void set_stylebox(ButtonState state, StyleBox new_stylebox);
 
     uint16_t get_text_color(ButtonState state) const { return text_colors[static_cast<int>(state)]; }

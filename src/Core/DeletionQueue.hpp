@@ -17,9 +17,8 @@ namespace detail {
 
 /*
     The list of nodes waiting to be destroyed, drained once per frame by the main
-    loop. Delayed destruction buys reentrancy safety - a click handler can remove a
-    node without pulling it out from under the loop iterating the tree. It is not
-    what makes a raw pointer safe afterwards; that is NodeRef.
+    loop. Destruction is deferred so a click handler can remove a node without
+    pulling it out from under the loop iterating the tree.
 
     Two containers, because there are two ways to leave:
 
@@ -29,20 +28,11 @@ namespace detail {
       - enqueue_detached()  the caller already unparented it, which handed us
                             the ownership, so it has to be held as unique_ptr.
 
-    Recording an id instead of a pointer is what keeps the bookkeeping trivial.
-    Resolving it at drain time answers the two questions a stored pointer cannot:
-    a node already destroyed inside an ancestor's subtree resolves to nothing and
-    is skipped (so nested queue_free() needs no cancelling), and a node whose
-    remove_child() the consumer has since claimed has no parent and must not be
-    deleted at all.
+    Recording an id rather than a pointer lets the drain skip a node already
+    destroyed inside an ancestor's subtree, and skip one whose remove_child() the
+    consumer has since claimed.
 
-    Godot stores ObjectIDs for the same reason (scene/main/scene_tree.cpp). It
-    never has to solve the ownership clash on the detached path because it uses
-    raw pointers throughout; keeping the parent as owner until the drain is what
-    avoids it here.
-
-    Internal header: not installed, not part of the public API. The main loop owns
-    the drain schedule.
+    Internal header: not installed, not part of the public API.
 */
 struct PendingDeletion {
     std::vector<uint64_t> scheduled_ids;
@@ -85,8 +75,8 @@ inline void drain_pending_deletions() {
         const NodeRef<Node> parent_ref = node->get_parent();
         if (!parent_ref) continue;            // consumer owns it now
 
-        // Still owned by its parent's unique_ptr; reclaiming it here is what
-        // actually destroys it, subtree and all.
+        // Still owned by its parent's unique_ptr; reclaiming it here destroys it,
+        // subtree and all.
         std::unique_ptr<Node> owned = parent_ref.get()->remove_child(node->child_index());
     }
 

@@ -39,7 +39,7 @@ private:
     std::vector<InputEvent> input_events;
 
     // Keys that went down during the last poll, so was_key_pressed() can answer
-    // after the events themselves have been drained.
+    // after the events are drained.
     std::vector<Key> keys_pressed;
 
     // Convert our platform-neutral color ID (0-15) to Windows WORD foreground attribute

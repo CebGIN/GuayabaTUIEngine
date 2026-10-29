@@ -35,26 +35,21 @@ private:
 
     int wheel_delta = 0;
 
-    /*
-        Raw bytes read but not yet turned into events. A read can split a
-        sequence arbitrarily - an arrow key's three bytes landing in two reads, a
-        paste of thirty keystrokes - so a partial tail is held here and completed
-        next poll instead of being guessed at.
-    */
+    // Raw bytes read but not yet turned into events. A read can split a sequence
+    // arbitrarily, so a partial tail is held here and completed next poll.
     std::string pending_bytes;
 
-    // Whether a lone ESC has already waited one poll. A trailing ESC is
-    // ambiguous: Escape pressed, or the first byte of a sequence yet to arrive.
-    // After one empty poll it is taken as the Escape key.
+    // A trailing ESC is ambiguous: Escape pressed, or the first byte of a
+    // sequence yet to arrive. After one empty poll it is taken as Escape.
     bool esc_waiting = false;
 
-    // What the terminal sent since the last drain, and the set of keys that went
-    // down this poll (kept apart so was_key_pressed survives the drain).
+    // What the terminal sent since the last drain, and the keys that went down
+    // this poll (kept apart so was_key_pressed survives the drain).
     std::vector<InputEvent> input_events;
     std::vector<Key> keys_pressed;
 
-    // Modifiers as last reported by a named sequence. A terminal reports these
-    // only alongside a cursor or function key, never on their own.
+    // Modifiers as last reported by a named sequence, which is the only way a
+    // terminal sends them.
     bool shift_held = false;
     bool ctrl_held = false;
     bool alt_held = false;

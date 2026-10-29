@@ -14,40 +14,18 @@ namespace detail {
 /*
     Side table mapping a packed uint64_t id to a live Node pointer.
 
-    WHY THIS EXISTS
-    Raw Node* handles are the fast path for in-subtree access, and they are not
-    safe on their own: the tree frees nodes, so any handle held across a free
-    dangles. This table is what lets a cheap handle detect that.
-
-    THE ID
     An id packs a slot index and a generation into one integer:
 
         [ generation : 32 ][ slot : 32 ]
 
     Resolving is an array index plus one comparison. unregister_node() zeroes the
-    slot's generation, so every id ever handed out for that slot stops matching
-    immediately. Because the generation comes from a monotonic counter that never
-    repeats, a handle minted before the slot was freed stays dead even after
-    another node is constructed into the same address. Without the generation a
-    handle would silently resolve to the wrong node instead of to nothing, which
-    is a wrong-behaviour bug rather than a crash.
+    slot's generation, so every id handed out for that slot stops matching. The
+    generation comes from a monotonic counter, so a handle stays dead even after
+    another node is built into the same address.
 
-    Same shape Godot uses for ObjectDB (core/object/object.cpp), except Godot
-    threads its free list through the slots' unused bitfields. We keep an
-    explicit free list: a few hundred nodes do not justify the trickery.
-
-    COST
-    One vector push/pop per node construction and destruction. Nothing per frame.
-
-    THREADING
-    Single-threaded by assumption, deliberately: the engine runs exactly one loop.
-    There is no lock here. If a worker thread is ever added, this class must grow
-    one (Godot guards ObjectDB with a SpinLock for exactly that reason), or nodes
-    deleted off-thread will race with resolution here.
-
-    LIFETIME
-    instance() returns a leaked singleton. Nodes may live in static storage, and a
-    destroyed registry would be reached by their destructors.
+    One vector push/pop per node construction and destruction, nothing per frame.
+    Single-threaded by assumption: there is no lock. instance() returns a leaked
+    singleton, because nodes may live in static storage.
 */
 class NodeRegistry {
 public:
@@ -61,25 +39,18 @@ public:
 
     uint64_t register_node(Node* node);
 
-    // Idempotent only via Node's destructor guard; passing an unknown id is a
-    // no-op rather than an error, since ids are only ever derived from a Node.
+    // An unknown id is a no-op; ids only ever come from a Node.
     void unregister_node(uint64_t id);
 
     // nullptr once the node has been freed, even if its slot was reused.
     Node* resolve(uint64_t id) const;
 
-    // Whether that id still names a live node. resolve() == nullptr would do,
-    // except that a caller holding a raw Node* wants to know whether *that
-    // pointer* is still the node it was, and a fresh node constructed into the
-    // freed address makes resolve() non-null while saying nothing about whether
-    // it is the same object. Comparing the id re-asks the question that matters.
-    //
-    // Use this after calling out to code that could have destroyed the node -
-    // see Node::update().
+    // Whether that id still names the same live node. Unlike resolve(), a fresh
+    // node built into a freed address does not count. Use this after calling out
+    // to code that could have destroyed the node.
     bool is_live(uint64_t id) const;
 
-    // Number of nodes constructed but not yet destroyed. Non-zero after the
-    // scene is torn down means something leaked.
+    // Nodes constructed but not yet destroyed.
     size_t live_count() const;
 
 private:

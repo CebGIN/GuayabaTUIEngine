@@ -1,10 +1,8 @@
 #ifndef GUAYABA_TERMINAL_KEYSEQUENCE_HPP
 #define GUAYABA_TERMINAL_KEYSEQUENCE_HPP
 
-// Private backend helper. NOT part of the public API: the escape tables and the
-// byte decoding live here and only here, so both platform backends parse the
-// terminal byte stream the same way, and so the pure functions can be tested
-// headlessly. See tests/key_parsing.cpp.
+// Private backend helper. NOT part of the public API: the escape tables and byte
+// decoding live here, shared by both platform backends and tested headlessly.
 
 #include <cstddef>
 #include <string>
@@ -14,8 +12,7 @@
 namespace guayaba {
 namespace keyseq {
 
-// A byte above ASCII has no named key, so it is reported as UNKNOWN with the
-// character attached.
+// Maps an ASCII byte to its named key, or Key::NONE when there is none.
 inline Key key_from_ascii(unsigned char byte) {
     if (byte >= 'a' && byte <= 'z')
         return static_cast<Key>(static_cast<uint16_t>(byte) - 'a' + 'A');
@@ -31,9 +28,8 @@ inline Key key_from_ascii(unsigned char byte) {
     pending). A malformed continuation is treated as a one-byte codepoint rather
     than desyncing the stream.
 
-    The leading byte's length is decided most-significant first: 0xF0 before
-    0xE0 before 0xC0. Getting this order wrong makes every 3- and 4-byte
-    codepoint decode as 2 bytes.
+    The leading byte's length is decided most-significant first: 0xF0 before 0xE0
+    before 0xC0.
 */
 inline std::size_t decode_utf8(const std::string& buffer, std::size_t index,
                                char32_t& codepoint) {
@@ -75,8 +71,8 @@ inline std::size_t decode_utf8(const std::string& buffer, std::size_t index,
     return length;
 }
 
-// ctrl / alt / shift are 1 + (bit0=shift, bit1=alt, bit2=ctrl) per the xterm
-// spec, so the modifier parameter of a modified sequence is this minus one.
+// The xterm modifier parameter is 1 + (bit0=shift, bit1=alt, bit2=ctrl), so a
+// sequence's modifier minus one gives these bits.
 inline constexpr int MOD_SHIFT = 1;
 inline constexpr int MOD_ALT = 2;
 inline constexpr int MOD_CTRL = 4;
@@ -232,8 +228,8 @@ inline std::size_t match_escape(const std::string& buffer, Key& key, bool& shift
 
     shift = alt = ctrl = false;
 
-    // Modified forms first: they are longer, and the bare CSI forms would match a
-    // partial modified sequence if tested in the other order.
+    // Modified forms first: the bare CSI forms would match a partial modified
+    // sequence otherwise.
     const std::size_t modified_tilde =
         match_modified_tilde(buffer, key, shift, alt, ctrl);
     if (modified_tilde > 0) return modified_tilde;

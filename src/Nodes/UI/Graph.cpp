@@ -13,9 +13,6 @@ namespace {
 // (full block):
 //
 //     0 ' '  1 ▁  2 ▂  3 ▃  4 ▄  5 ▅  6 ▆  7 ▇  8 █
-//
-// The partial blocks are what buy sub-cell resolution: without them a one-row
-// graph could only say "on" or "off".
 const wchar_t* LADDER = L" \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
 constexpr int LEVELS_PER_ROW = 8;
 
@@ -27,9 +24,8 @@ wchar_t cell_glyph(int filled, int row, int rows, bool fill) {
     const int remaining = filled - from_below;
 
     if (!fill) {
-        // Sparkline: only the topmost non-empty cell of the column survives. The
-        // row that cell lands in is derived from the fill so it does not matter
-        // which rows are full underneath.
+        // Sparkline: only the topmost non-empty cell survives, derived from the
+        // fill.
         if (filled <= 0) return L' ';
         const int top_row = rows - 1 - (filled - 1) / LEVELS_PER_ROW;
         if (row != top_row) return L' ';
@@ -48,9 +44,8 @@ Graph::Graph(const std::string& node_name, Vec2 node_position)
 // --- Size -------------------------------------------------------------------
 
 Vec2 Graph::get_minimum_size() const {
-    // One row is the floor: a shorter graph could not show a level at all. The
-    // width is the caller's floor unchanged, because the series scrolls its own
-    // window rather than asking to be as wide as its history.
+    // One row is the floor; the width is the caller's floor unchanged, since the
+    // series scrolls its own window.
     const Vec2 own = Control::get_minimum_size();
     return {own.x, std::max(own.y, 1)};
 }
@@ -64,8 +59,7 @@ void Graph::set_values(std::vector<double> new_values) {
 void Graph::push_value(double value) {
     values.push_back(value);
 
-    // A rolling history keeps the newest `capacity` samples and forgets the rest;
-    // the oldest are the ones that fall off the left.
+    // Keeps the newest `capacity` samples; the oldest fall off the left.
     if (capacity > 0 && static_cast<int>(values.size()) > capacity) {
         const std::size_t excess = values.size() - static_cast<std::size_t>(capacity);
         values.erase(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(excess));
@@ -99,8 +93,8 @@ void Graph::visible_range(int columns, std::size_t& begin, std::size_t& end) con
         return;
     }
 
-    // Newest at the right: the window keeps the last `columns` samples. When there
-    // are fewer, begin stays at zero and the draw pushes the block right.
+    // The window keeps the last `columns` samples; with fewer, begin stays at zero
+    // and the draw pushes the block right.
     const std::size_t window = static_cast<std::size_t>(columns);
     begin = values.size() > window ? values.size() - window : 0;
 }
@@ -111,8 +105,7 @@ void Graph::effective_range(std::size_t begin, std::size_t end, double& lo,
         lo = range_min;
         hi = range_max;
     } else if (begin >= end || values.empty()) {
-        // No data to measure: a plain unit band, so filled_eighths has something
-        // to divide by and nothing is drawn that depends on it anyway.
+        // No data: a plain unit band so filled_eighths has a divisor.
         lo = 0.0;
         hi = 1.0;
     } else {
@@ -124,13 +117,11 @@ void Graph::effective_range(std::size_t begin, std::size_t end, double& lo,
         }
     }
 
-    // A caller can hand a fixed range the wrong way round; normalising here keeps
-    // every draw path from having to care.
+    // Normalises a fixed range handed the wrong way round.
     if (hi < lo) std::swap(lo, hi);
 
-    // A flat series (or a fixed range of zero width) has no span to normalise
-    // against. Widening around the value puts the line through the middle of the
-    // plot instead of collapsing it to the bottom or dividing by zero.
+    // A flat series has no span to normalise against, so widen around the value
+    // and put the line through the middle.
     if (hi - lo <= 0.0) {
         lo -= 0.5;
         hi += 0.5;
@@ -141,8 +132,8 @@ int Graph::filled_eighths(double value, double lo, double hi, int rows) {
     if (rows <= 0) return 0;
 
     const double span = hi - lo;
-    // effective_range guarantees span > 0, but a direct call may not: centring is
-    // the same answer the widening band would give.
+    // effective_range guarantees span > 0, but a direct call need not: centring
+    // matches the widened band.
     double normalized = span > 0.0 ? (value - lo) / span : 0.5;
     normalized = std::clamp(normalized, 0.0, 1.0);
 
@@ -169,14 +160,13 @@ void Graph::draw(ConsoleRenderer& renderer, const Rect& clip) {
     double hi = 1.0;
     effective_range(begin, end, lo, hi);
 
-    // Right-aligned: the drawn block hugs the right edge, so the newest sample is
-    // at the right border whatever the history length.
+    // Right-aligned: the newest sample hugs the right border whatever the history
+    // length.
     const int count = static_cast<int>(end - begin);
     const int start_column = columns - count;
 
-    // Column-major so the fill level is computed once per sample rather than once
-    // per cell. Every cell is written, empty ones included, so the plot owns its
-    // rect and no stale glyph survives from an earlier frame.
+    // Column-major so the fill is computed once per sample. Every cell is written,
+    // empty ones included, so no stale glyph survives from an earlier frame.
     for (int column = 0; column < columns; ++column) {
         int filled = 0;
         if (column >= start_column) {
@@ -187,8 +177,7 @@ void Graph::draw(ConsoleRenderer& renderer, const Rect& clip) {
 
         for (int row = 0; row < rows; ++row) {
             const wchar_t glyph = cell_glyph(filled, row, rows, fill);
-            // Per cell, because the glyph is decided by the sample's level and not
-            // by a run of text - exactly the per-cell case put_char is for.
+            // The glyph depends on the sample's level, not on a run of text.
             renderer.put_char(Vec2{area.pos.x + column, area.pos.y + row}, glyph,
                               line_color, background_color, clip);
         }

@@ -13,10 +13,8 @@ namespace guayaba {
 
 class IOSTerminal;
 
-// How a frame draws its edges. This lives with the renderer because box drawing
-// is a terminal idiom (ncurses has box(), SDL has DrawRect): the renderer knows
-// how to render each appearance, while StyleBox only decides whether and with
-// what theme to ask for one.
+// How a frame draws its edges. The renderer knows how to draw each appearance;
+// StyleBox only decides whether and with what theme to ask for one.
 enum class StyleBorder {
     NONE,      // no border, whatever the width says
     ASCII,     // | -
@@ -37,45 +35,28 @@ public:
 
     Vec2 get_buffer_size() const;
 
-    // Reallocates the back buffer, e.g. after a terminal resize. No-op if the
-    // size is unchanged, so it is safe to call every frame.
+    // Reallocates the back buffer, e.g. after a resize. No-op when the size is unchanged.
     void resize(Vec2 new_size);
 
     void clear_buffer();
 
-    // Clipping is passed per primitive, never held as renderer state. The reason
-    // is that it keeps a draw call self-contained: what it writes is a pure
-    // function of its arguments, with no hidden mode inherited from whatever
-    // was drawn before it. So no sibling can leave a region dirty for the next
-    // one, there is no push/pop discipline to get wrong, and the renderer can be
-    // driven from anywhere without setup. Batch primitives are what make this
-    // affordable - a node issues one or two calls per region, not one per cell.
-    // An empty clip draws nothing.
-    //
-    // Each primitive intersects its content against the clip up front and then
-    // iterates only that visible window, so a partly offscreen box or a partly
-    // scrolled label costs no more than what actually lands on screen.
-    //
-    // Batch primitives - hand over the whole content and let the renderer
-    // slice it. These are what nodes normally use.
+    // Clipping is passed per primitive, never held as renderer state, so a draw
+    // call is a pure function of its arguments. Each primitive intersects its
+    // content against the clip and iterates only the visible window. An empty clip
+    // draws nothing. These batch primitives are what nodes normally use.
     void put_text(Vec2 origin, const std::vector<std::string>& lines, uint16_t fg,
                   uint16_t bg, const Rect& clip);
 
-    // Paints every cell of area with ch. Intersects against clip first, so a
-    // fill larger than the screen only touches what fits.
+    // Paints every cell of area with ch.
     void fill_rect(const Rect& area, wchar_t ch, uint16_t fg, uint16_t bg,
                    const Rect& clip);
 
-    // Draws a frame around area, `width` cells thick, in the requested style.
-    // Corners, dash phasing and multi-ring thickness are handled here; the
-    // caller passes only the appearance and colors. corner_radius picks arc
-    // joints for StyleBorder::ROUNDED and is ignored by every other style.
+    // Draws a frame around area, `width` cells thick. corner_radius picks arc
+    // joints for StyleBorder::ROUNDED and is ignored by other styles.
     void draw_box(const Rect& area, StyleBorder style, uint16_t fg, uint16_t bg, int width,
                   int corner_radius, const Rect& clip);
 
-    // Fine-grained escape hatch for procedural or per-cell drawing, where the
-    // glyph at a cell depends on something a batch primitive cannot see (the
-    // dashed border's corner joints are the in-tree case). Clips this one cell.
+    // Per-cell drawing, for glyphs a batch primitive cannot compute. Clips this cell.
     void put_char(Vec2 pos, wchar_t character, uint16_t fg, uint16_t bg, const Rect& clip);
 
     void present();

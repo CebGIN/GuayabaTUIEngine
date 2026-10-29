@@ -12,43 +12,17 @@ namespace guayaba {
 /*
     A Container that lays its children out in a row, left to right.
 
-    Where a Container piles its children on top of each other inside one
-    aligned block, an HBox gives each one a cell of its own along the
-    horizontal axis. The cross axis fills - every cell spans the full height of
-    the HBox's resolved rect rather than the strip's minimum height - so a
-    child that stretches (Grow::Both or the FullRect preset) reaches both
-    edges, and one anchored TopLeft sits at the HBox's top edge rather than at
-    the strip's.
+    Each child gets a cell as wide as its own minimum size (set through
+    set_custom_minimum_size); the gap between cells is `separation`. The cross
+    axis fills: every cell spans the full height of the HBox's resolved rect, so
+    a child anchored TopLeft sits at the HBox's top edge rather than at the
+    strip's. How a child fills its cell is up to its own anchors and Grow.
 
-        +---------------------------+
-        |  [a]  [b]    [c]          |  <- each cell is the child's own
-        +---------------------------+     minimum width and the full height
-        |          ^ the HBox itself |
-        +---------------------------+
-
-    A cell is exactly as wide as the child's own minimum size, so a child that
-    wants more room says so through set_custom_minimum_size. The gap between two
-    cells is the separation; there is none before the first or after the last.
-
-    The strip of cells is as wide as the children's minimums plus their
-    separations, and content_alignment says where that strip sits inside the
-    HBox: at the left (Begin), in the middle (Center, the default) or at the
-    right (End). Space the strip does not use stays empty, implied by the
-    alignment.
-
-    The space is not always meant to stay empty. If the HBox is wider than the
-    strip and at least one child has Grow::Both on the horizontal axis, the
-    leftover is split between those children instead: each of their cells grows
-    by an equal share of it, and the remainder goes to the first of them in
-    order. The expanded strip therefore spans the whole HBox - it is the box,
-    not the minimum - so content_alignment has nothing left to offset and a box
-    with expanders on the horizontal axis lays out edge to edge whatever the
-    alignment says. Grow::Both already means "stretch to fill the cell", so a
-    grown cell asks nothing new of the child.
-
-    The child still owns its own placement inside its cell. An HBox gives it the
-    cell and moves it there; how the child fills that cell is down to its own
-    anchors and Grow.
+    content_alignment places the strip inside the HBox: Begin at the left, Center
+    (the default) in the middle, End at the right. If the HBox is wider than the
+    strip and at least one child has Grow::Both horizontally, the leftover is
+    split equally between those children (remainder to the first), and the strip
+    spans the whole box.
 */
 class HBox : public Container {
     int separation = 0;
@@ -65,8 +39,7 @@ public:
 
     int get_separation() const { return separation; }
 
-    // Floored at zero, like every other extent here: a negative gap would pull
-    // two cells into each other, which is the one thing a row cannot mean.
+    // Floored at zero.
     void set_separation(int new_separation) {
         separation = new_separation < 0 ? 0 : new_separation;
     }

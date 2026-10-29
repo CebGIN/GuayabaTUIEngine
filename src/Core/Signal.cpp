@@ -5,9 +5,8 @@ namespace guayaba::detail {
 
 namespace {
 
-// 0 is NodeRegistry::INVALID_ID and is never handed out as a connection id, so a
-// default-initialised id_ is unambiguously "no connection". Monotonic rather than
-// reused, so a stale id can never name a different connection later.
+// 0 is NodeRegistry::INVALID_ID and is never handed out, so a default-initialised
+// id_ means "no connection". Monotonic, so a stale id never names a later one.
 uint64_t connection_id_counter = 0;
 
 } // namespace

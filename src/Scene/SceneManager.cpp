@@ -56,21 +56,9 @@ void SceneManager::start_running() {
     Vec2 buffer_size = {100, 60};
     ConsoleRenderer renderer(buffer_size, os_terminal.get());
 
-    // Nothing below may be allowed to leave the terminal in raw mode.
-    //
-    // LinuxTerminal has no destructor, so restoring is the only thing that puts
-    // echo and the cursor back: if anything in the loop throws, the frame
-    // unwinds straight past a plain call at the bottom of this function and the
-    // user is left typing into a terminal that looks broken, needing `reset`.
-    // Hence a destructor rather than a statement at the end.
-    //
-    // That is a realistic path rather than a theoretical one. A signal reactor
-    // that throws escapes through update() and draw(); so does a connection to a
-    // built-in signal with the wrong signature, because emit_signal() rejects
-    // the mismatch by throwing rather than by staying silent.
-    //
-    // Deliberately not catching: the exception keeps propagating, so the stack
-    // trace still reaches main() intact and restore() runs on the way out.
+    // Restores the terminal if the loop below throws on its way out, which a
+    // statement at the end of the function would not. The exception still
+    // propagates.
     struct TerminalRestoreGuard {
         IOSTerminal* terminal;
         ~TerminalRestoreGuard() { if (terminal) terminal->restore(); }
@@ -78,11 +66,10 @@ void SceneManager::start_running() {
 
     while (this->is_running) {
 
-        // Taken once per frame so the budget at the bottom is measured against
-        // the whole frame, and from the same clock the delta uses.
+        // Taken once per frame, from the same clock the budget below uses.
         const auto frame_start = std::chrono::steady_clock::now();
 
-        //Cambio de escena
+        // Scene change.
         if (next_scene){
             // Before exit_tree, so a control still exists to hear focus_exited.
             FocusManager::get_instance().clear();
@@ -105,27 +92,25 @@ void SceneManager::start_running() {
                   process_scene()  per-frame logic, seeing the result
                   draw()           the picture
 
-                Layout comes before input because routing hit-tests: a control
-                that resized this frame is tested against the size it will be
-                drawn at, not last frame's. Input comes before update, so a
-                control that acted on a key has done so before a script reads its
-                state in the same frame.
+                Routing hit-tests, so layout must precede it: a control that
+                resized this frame is tested against the size it will be drawn
+                at. Input precedes update, so a control that acted on a key has
+                done so before a script reads its state in the same frame.
             */
             Input::refresh_input();
 
             // Held in a local: route_input takes the vector by reference so a
-            // control can consume an event by removing it.
+            // control can erase a consumed event.
             std::vector<InputEvent> events = Input::drain_input_events();
 
-            // Layout before draw, and after the resize above so Controls
-            // measure against the buffer size actually about to be painted.
+            // After the resize above, so Controls measure against the buffer size
+            // about to be painted.
             this->root_node->update_layout(Rect::from_size(renderer.get_buffer_size()));
 
             this->root_node->route_input(events);
 
             // Whatever nobody consumed, offered to scripts and to the bus as the
-            // unhandled fallback - where a global shortcut belongs, so it does not
-            // fire while a focused control is eating keys.
+            // unhandled fallback.
             if (!events.empty()) {
                 SignalBus& bus = SignalBus::get_instance();
                 const bool bus_listens = bus.is_declared("unhandled_input");
@@ -141,9 +126,8 @@ void SceneManager::start_running() {
             // it passes down through any Control that clips.
             this->root_node->draw(renderer, Rect::from_size(renderer.get_buffer_size()));
 
-            // Last, so that anything freed earlier in the frame is already gone
-            // before the next one starts, and so a node queued by on_process still
-            // draws its final frame.
+            // Last, so a node queued by on_process still draws its final frame
+            // and is gone before the next frame starts.
             detail::drain_pending_deletions();
 
             renderer.present();
@@ -151,14 +135,10 @@ void SceneManager::start_running() {
         }
 
         /*
-            Spend whatever is left of the frame's budget waiting rather than
-            starting the next one straight away. Placed after present() so the
-            terminal has just been written to and is about to have time to be
-            read, which stops the writer outrunning the reader.
-
-            Only when there is time to spare: a frame that overran its budget
-            gets none of this, so one slow frame does not push every later one
-            further behind and turn a hiccup into permanent lag.
+            Spend whatever is left of the frame's budget waiting. Placed after
+            present(), so the terminal has just been written to and now has time
+            to be read. A frame that overran its budget gets none of this, so one
+            slow frame does not push every later one further behind.
         */
         if (target_fps > 0 && this->is_running && this->root_node) {
             using clock = std::chrono::steady_clock;
@@ -177,8 +157,7 @@ void SceneManager::start_running() {
     }
     detail::drain_pending_deletions();
 
-    // Terminal restoration is terminal_guard's job, not a statement here: see
-    // its definition above for why it has to be a destructor.
+    // Terminal restoration is terminal_guard's job; see its definition above.
 }
 
 void SceneManager::stop_running() {

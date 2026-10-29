@@ -10,13 +10,11 @@ namespace guayaba {
 
 namespace {
 
-// A continuation byte is 10xxxxxx; every other byte starts a codepoint. This one
-// test is what makes walking the string forwards and backwards agree on where the
-// codepoint boundaries are, which is what keeps the caret valid.
+// A continuation byte is 10xxxxxx; every other byte starts a codepoint. Forward
+// and backward walks share this test, which keeps them agreeing on boundaries.
 bool is_continuation(unsigned char byte) { return (byte & 0xC0) == 0x80; }
 
-// The UTF-8 bytes for one codepoint. The insert path hands the result straight to
-// std::string::insert, so this is the only place bytes are built rather than read.
+// The UTF-8 bytes for one codepoint, handed straight to std::string::insert.
 std::string encode(char32_t codepoint) {
     std::string out;
     if (codepoint < 0x80) {
@@ -37,8 +35,7 @@ std::string encode(char32_t codepoint) {
     return out;
 }
 
-// The byte offset one codepoint after index, clamped to size(). This is "move the
-// caret right" at the byte level.
+// Byte offset one codepoint after index, clamped to size().
 std::size_t next_offset(const std::string& value, std::size_t index) {
     if (index >= value.size()) return value.size();
     std::size_t i = index + 1;
@@ -46,8 +43,7 @@ std::size_t next_offset(const std::string& value, std::size_t index) {
     return i;
 }
 
-// The byte offset one codepoint before index. This is "move the caret left" and
-// "delete the character behind the caret" at the byte level.
+// Byte offset one codepoint before index.
 std::size_t previous_offset(const std::string& value, std::size_t index) {
     if (index == 0) return 0;
     std::size_t i = index - 1;
@@ -55,8 +51,8 @@ std::size_t previous_offset(const std::string& value, std::size_t index) {
     return i;
 }
 
-// Codepoints in value[0, end). The caret column is this count for the caret byte
-// offset, since one codepoint is one cell on the grid.
+// Codepoints in value[0, end); the caret column is this count for the caret byte
+// offset.
 std::size_t count_codepoints(const std::string& value, std::size_t end) {
     std::size_t count = 0;
     std::size_t i = 0;
@@ -71,8 +67,7 @@ std::size_t count_codepoints(const std::string& value) {
     return count_codepoints(value, value.size());
 }
 
-// Byte offset of the count-th codepoint, clamped to size(). Used to find the first
-// byte of the visible window from its column.
+// Byte offset of the count-th codepoint, clamped to size().
 std::size_t codepoint_offset(const std::string& value, std::size_t count) {
     std::size_t i = 0;
     while (count > 0 && i < value.size()) {
@@ -86,25 +81,18 @@ std::size_t codepoint_offset(const std::string& value, std::size_t count) {
 
 LineEdit::LineEdit(const std::string& node_name, Vec2 node_position)
     : Control(node_name, node_position) {
-    // Declared here rather than on demand at the emit, so connect_signal finds
-    // them before anything has fired and so the two are the signals a LineEdit is
-    // known to have. Both carry the current text, which is what a listener acts on.
+    // Declared here so connect_signal finds them. Both carry the current text.
     declare_signal<std::string>("text_changed");
     declare_signal<std::string>("text_submitted");
 
-    // Reachable by keyboard: clicking focuses it, and Tab reaches it. Taking the
-    // focus on click is done in on_gui_input, because the engine does not
-    // auto-focus - see the class comment.
+    // Reachable by keyboard: clicking focuses it, and Tab reaches it.
     set_focus_mode(FocusMode::CLICK);
 }
 
 // --- Size -------------------------------------------------------------------
 
 Vec2 LineEdit::get_minimum_size() const {
-    // Always one line tall: a field that could be laid out two rows tall would
-    // draw its text in the first and leave the rest as a mystery band. A taller
-    // caller minimum still wins - this is a floor, and the frame comes off it so
-    // the text sits inside the border rather than under it.
+    // Always one line tall plus the frame; a taller caller minimum still wins.
     const Vec2 frame = stylebox.get_frame_size();
     const Vec2 own = Control::get_minimum_size();
     return {own.x + frame.x, std::max(own.y, 1 + frame.y)};
@@ -117,8 +105,7 @@ Rect LineEdit::content_rect() const { return stylebox.get_content_rect(get_rect(
 void LineEdit::clamp_caret() {
     if (caret > text.size()) caret = text.size();
 
-    // Stepping back off a continuation byte is what keeps the caret on a boundary
-    // after an index was clamped down or set from outside inside a codepoint.
+    // Steps back off a continuation byte, keeping the caret on a boundary.
     while (caret > 0 && caret < text.size() &&
            is_continuation(static_cast<unsigned char>(text[caret]))) {
         --caret;
@@ -126,8 +113,8 @@ void LineEdit::clamp_caret() {
 }
 
 void LineEdit::commit_text(std::string new_text) {
-    // The equality gate is why "text_changed" can be trusted: it means the value
-    // moved, not that something asked it to. A re-typed identical value is silent.
+    // The equality gate makes "text_changed" mean the value moved: an identical
+    // re-set is silent.
     if (new_text == text) return;
 
     text = std::move(new_text);
@@ -136,9 +123,8 @@ void LineEdit::commit_text(std::string new_text) {
 }
 
 bool LineEdit::insert_codepoint(char32_t codepoint) {
-    // Codepoints, not bytes: the limit is the count the user sees. Once full the
-    // character is dropped, but the key is still consumed - letting it fall
-    // through would make it act on whatever is behind the field.
+    // The limit counts codepoints, not bytes. Once full the character is dropped
+    // but the key is still consumed.
     if (max_length > 0 &&
         static_cast<int>(count_codepoints(text)) >= max_length) {
         return false;
@@ -203,9 +189,8 @@ void LineEdit::set_background_color(const std::string& color_name) {
 
 bool LineEdit::on_gui_input(const InputEvent& event) {
     if (event.type == InputEvent::Type::MOUSE_BUTTON) {
-        // Focus is taken here because the engine does not do it for a click; a
-        // field is the control where that gesture means nothing else. Consuming it
-        // keeps the press from also reaching whatever sits behind.
+        // Focus is taken here because the engine does not do it for a click.
+        // Consuming it keeps the press from reaching behind.
         if (event.pressed && event.mouse_button == MouseButton::LEFT) {
             grab_focus();
             return true;
@@ -213,8 +198,8 @@ bool LineEdit::on_gui_input(const InputEvent& event) {
         return false;
     }
 
-    // Keys below this line only ever arrive while focused: Control::can_receive_input
-    // gates KEY events by is_focused(), so there is no check to repeat here.
+    // Keys below arrive only while focused: Control::can_receive_input gates KEY
+    // events by is_focused().
     if (event.type != InputEvent::Type::KEY || !event.pressed) return false;
 
     switch (event.key) {
@@ -246,9 +231,7 @@ bool LineEdit::on_gui_input(const InputEvent& event) {
             caret = text.size();
             return true;
 
-        // Declined, not consumed: Tab has to reach FocusManager to move on, and
-        // Escape is the scene's to cancel with. Swallowing either here would make
-        // a field trap the keyboard.
+        // Declined, not consumed: Tab must reach FocusManager and Escape the scene.
         case Key::TAB:
         case Key::ESCAPE:
             return false;
@@ -257,9 +240,8 @@ bool LineEdit::on_gui_input(const InputEvent& event) {
             break;
     }
 
-    // A printable codepoint. The upper test excludes DEL, and the ctrl test keeps
-    // control combinations (which some terminals deliver as a low text byte) from
-    // typing a control character.
+    // A printable codepoint. The upper test excludes DEL; the ctrl test keeps
+    // control combinations from typing a control character.
     if (event.text >= 0x20 && event.text != 0x7f && !event.ctrl) {
         insert_codepoint(event.text);
         return true;
@@ -271,9 +253,7 @@ bool LineEdit::on_gui_input(const InputEvent& event) {
 // --- Drawing ----------------------------------------------------------------
 
 void LineEdit::draw(ConsoleRenderer& renderer, const Rect& clip) {
-    // The field is drawn exactly as large as it is and is clipped only by what its
-    // ancestors allowed: clip_children governs what this node contains, not
-    // whether the node itself is visible.
+    // Drawn exactly as large as it is, clipped only by its ancestors.
     stylebox.apply(renderer, get_rect(), clip);
 
     const Rect content = content_rect();
@@ -286,10 +266,8 @@ void LineEdit::draw(ConsoleRenderer& renderer, const Rect& clip) {
     const int origin_x = content.pos.x;
     const int row = content.pos.y;
 
-    // The field owns its content band: every visible cell is painted, so the
-    // surface is uniform whatever the StyleBox filled, and the caret block is a
-    // solid cell rather than a gap. A StyleBox background wins over the field's
-    // own, the way Button lets its box decide the band under the text.
+    // The field paints every visible cell, so the surface is uniform and the caret
+    // block is solid. A StyleBox background wins over the field's own.
     const uint16_t background = stylebox.has_background()
                                     ? *stylebox.get_background_color()
                                     : background_color;
@@ -302,11 +280,8 @@ void LineEdit::draw(ConsoleRenderer& renderer, const Rect& clip) {
     const std::size_t caret_column =
         empty ? 0 : count_codepoints(text, caret);
 
-    // The window scrolls only as far as it must to keep the caret visible. The
-    // caret is a cell of its own - at the end of the line it sits past the last
-    // character - so the condition is caret_column + 1 > width rather than
-    // caret_column >= width, and a line that fills the field exactly still scrolls
-    // by one to make room for it. While the caret fits, first stays zero.
+    // Scroll only as far as needed to keep the caret visible. The caret is a cell
+    // of its own past the last character, so the test is caret_column + 1 > width.
     std::size_t first = 0;
     if (!empty && caret_column + 1 > static_cast<std::size_t>(width)) {
         first = caret_column + 1 - static_cast<std::size_t>(width);
@@ -326,8 +301,7 @@ void LineEdit::draw(ConsoleRenderer& renderer, const Rect& clip) {
             char32_t codepoint = 0;
             const std::size_t length = decode_utf8(source, byte, codepoint);
             // Secret mode substitutes the glyph, one per visible codepoint, so the
-            // masked width still matches what was typed. The stored text is not
-            // touched - get_text() still returns it.
+            // width still matches. The stored text is untouched.
             glyph = (secret && !empty) ? static_cast<wchar_t>(secret_character)
                                        : static_cast<wchar_t>(codepoint);
             byte += length;
@@ -337,21 +311,19 @@ void LineEdit::draw(ConsoleRenderer& renderer, const Rect& clip) {
         uint16_t cell_background = background;
         if (is_caret) {
             // Reverse video: the pair is swapped, so the caret is a block in the
-            // text colour with the character knocked out of it. A space at the end
-            // of the line becomes a plain block.
+            // text colour.
             cell_foreground = background;
             cell_background = text_color;
         }
 
-        // Per cell, not a batch: the glyph and the colours both depend on the
-        // caret's position and on secret mode, which is exactly the case
-        // ConsoleRenderer::put_char documents its escape hatch for.
+        // Per cell: the glyph and colours depend on the caret's position and on
+        // secret mode.
         renderer.put_char(Vec2{origin_x + column, row}, glyph, cell_foreground,
                           cell_background, clip);
     }
 
-    // Hand back to Control so the script hook still runs and children are drawn
-    // with the clip Control narrows for them.
+    // Hand back to Control so the script hook runs and children use the clip
+    // Control narrows for them.
     Control::draw(renderer, clip);
 }
 

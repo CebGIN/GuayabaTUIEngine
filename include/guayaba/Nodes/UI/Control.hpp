@@ -17,24 +17,24 @@ class FocusManager;
 /*
     Base class for nodes that lay themselves out.
 
-    A Control is given a rectangle by its parent - the console buffer at the
-    root, the enclosing Control's own rect below that - and turns its anchors
-    into a position and a size inside it:
+    A Control is given a rectangle by its parent - the console buffer at the root,
+    the enclosing Control's own rect below that - and turns its anchors into a
+    position and a size inside it:
 
         anchor 0.0   = the left/top edge of the parent rect
         anchor 1.0   = the right/bottom edge of the parent rect
 
-    The two horizontal anchors are independent of the two vertical ones, so
-    anchor_left = 0 and anchor_right = 1 spans the full width. AnchorPreset
-    just names the common combinations; the ratios are always the real state.
+    The horizontal anchors are independent of the vertical ones, so anchor_left = 0
+    and anchor_right = 1 spans the full width. AnchorPreset names common
+    combinations; the ratios are the real state.
 
     Layout runs once per frame from SceneManager, before draw(). See
     Node::update_layout.
 */
 
-// Named anchor combinations. set_anchor_preset() writes these into the four
-// ratios, and get_anchor_preset() reads them back; anything the presets do not
-// cover is still reachable through the individual setters.
+// Named anchor combinations written by set_anchor_preset() and read by
+// get_anchor_preset(); anything a preset does not cover is reachable through the
+// individual setters.
 enum class AnchorPreset {
     TopLeft,
     Top,
@@ -48,12 +48,8 @@ enum class AnchorPreset {
     FullRect,
 };
 
-// How a node is placed inside the rect its anchors name.
-//
-// Grow::None centers the node in the anchor rect. That is the useful default
-// for the point presets: Top is anchor (0.5, 0), a degenerate rect at the middle
-// of the top edge, and centering puts the node exactly there. Grow::None does
-// not mean "collapse", and it never shrinks the node below minimum size.
+// How a node is placed inside the rect its anchors name. Grow::None centres the
+// node without shrinking it below its minimum size.
 enum class Grow {
     None,    // keep the size, centred in the anchor rect
     Begin,   // keep the size, pinned to the start edge (left/top)
@@ -99,10 +95,9 @@ protected:
 
     void set_minimum_size(Vec2 new_minimum_size);
 
-    // Turns the anchors into cached_rect without touching the children.
-    // update_layout() does that and then hands cached_rect down; a subclass that
-    // needs its children to resolve against some other rect - see
-    // Container::update_layout - calls this instead and propagates itself.
+    // Turns the anchors into cached_rect without touching the children. A subclass
+    // that needs children to resolve against another rect (Container) calls this
+    // and propagates itself.
     void resolve_rect(const Rect& parent_rect);
 
 public:
@@ -118,23 +113,22 @@ public:
 
     /*
         Children in reverse (topmost first), then this control over what is left.
-        An event this control receives is removed from the vector, which is what
-        stops it reaching the controls behind. Node::route_input is deliberately
-        not called: its forward child walk has just been done in reverse.
+        A consumed event is removed from the vector, stopping it reaching controls
+        behind.
     */
     void route_input(std::vector<InputEvent>& events) override;
 
     /*
         Whether this control is a candidate for the event: a mouse event when the
-        pointer is over it, a key when it holds the focus. A subclass that takes
-        input outside its rect (a captured drag) overrides this.
+        pointer is over it, a key when it holds focus. A subclass that takes input
+        outside its rect (a captured drag) overrides this.
     */
     virtual bool can_receive_input(const InputEvent& event) const;
 
     /*
-        Entry point for one event already routed here. Decides who the event is
-        for, announces it on the "gui_input" signal, then hands it to
-        on_gui_input. Returns whether on_gui_input consumed it.
+        Entry point for one routed event: decides who it is for, announces it on
+        "gui_input", then hands it to on_gui_input. Returns whether on_gui_input
+        consumed it.
     */
     bool handle_input(const InputEvent& event);
 
@@ -147,7 +141,7 @@ public:
     bool is_focused() const { return focused; }
 
     // Takes the focus, emitting focus_exited on the previous holder and
-    // focus_entered here. Does nothing when the mode is NONE or it already has it.
+    // focus_entered here. No-op when the mode is NONE or it already has it.
     void grab_focus();
 
     // Gives the focus up, emitting focus_exited here if it was held.
@@ -205,21 +199,18 @@ public:
 protected:
     /*
         What this control does with an event that reached it. Returns true when it
-        consumed the event, which is what stops it going to the controls behind.
-        The default returns false: a control with no behaviour of its own observes
-        and does not swallow.
+        consumed the event, stopping it going to controls behind. Default false.
     */
     virtual bool on_gui_input(const InputEvent& event);
 
 private:
     FocusMode focus_mode = FocusMode::NONE;
 
-    // Whether this control holds the focus. Focus itself lives in FocusManager,
-    // process-wide; this is only the flag is_focused() answers without asking.
+    // Whether this control holds the focus; the authority is FocusManager.
     bool focused = false;
 
-    // Called by FocusManager on a focus change, so the control restyles and emits
-    // focus_entered / focus_exited. Not the route a scene takes.
+    // Called by FocusManager on a focus change: restyles and emits focus_entered /
+    // focus_exited.
     void set_focused_internal(bool now_focused);
 
     friend class FocusManager;

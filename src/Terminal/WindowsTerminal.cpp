@@ -10,7 +10,6 @@ namespace guayaba {
 // Convert our platform-neutral color ID (0-15) to Windows WORD foreground attribute
 WORD WindowsTerminal::color_id_to_win_fg(uint16_t color_id) {
     // Windows foreground bits: bit0=BLUE, bit1=GREEN, bit2=RED, bit3=INTENSITY
-    // Our IDs:   0=Black, 1=Red, 2=Green, 3=Yellow, 4=Blue, 5=Magenta, 6=Cyan, 7=White, 8-15=bright
     static const WORD table[16] = {
         0,                                                                  // 0  BLACK
         FOREGROUND_RED,                                                     // 1  RED
@@ -231,8 +230,8 @@ void WindowsTerminal::poll_events() {
                 // A button press or release. On a release the bit is already
                 // cleared in dwButtonState, so which button cannot be told from
                 // the record; the left button is reported, which is the common
-                // case. Release still carries pressed=false, which is what a drag
-                // listens for.
+                // case. Release still carries pressed=false, which a drag listens
+                // for.
                 InputEvent event;
                 event.type = InputEvent::Type::MOUSE_BUTTON;
                 event.mouse_pos = mouse_pos;

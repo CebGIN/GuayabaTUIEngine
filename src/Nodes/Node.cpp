@@ -15,10 +15,9 @@ void Node::for_each_child(Fn&& fn) {
     for (size_t i = 0; i < children.size(); ++i) {
         Node* child = children[i].get();
         fn(child);
-        // The callback may have removed this child, which shifts the tail left
-        // and would make us skip whatever moved into this slot. Comparing the
-        // vector's own storage is safe even though child itself may already be
-        // destroyed.
+        // The callback may have removed this child, shifting the tail left and
+        // making us skip whatever moved into this slot. Comparing the vector's
+        // own storage is safe even though child may already be destroyed.
         if (i < children.size() && children[i].get() != child) --i;
     }
 }
@@ -28,14 +27,12 @@ Node::Node(std::string node_name) : name(std::move(node_name)) {
 }
 
 Node::~Node() {
-    // Last chance to tell the script it is going away. This runs before any
-    // member is destroyed, so `children` and `parent` are still intact and a
-    // script's `node` reads as a coherent node - do not free it from here.
+    // Runs before any member is destroyed, so `children` and `parent` are still
+    // intact. Do not free the node from here.
     if (script) script->on_detached();
 
-    // The one place the registry is told. Every destruction path - the parent's
-    // unique_ptr, the deletion queue, stack unwinding - arrives here, so there is
-    // no way to free a node without the id being invalidated.
+    // The one place the registry is told, so no destruction path can leave the id
+    // resolving.
     if (instance_id_ != detail::NodeRegistry::INVALID_ID) {
         detail::NodeRegistry::instance().unregister_node(instance_id_);
         instance_id_ = detail::NodeRegistry::INVALID_ID;
@@ -56,9 +53,7 @@ void Node::exit_tree() {
 }
 
 std::string Node::make_child_name_unique(const std::string& wanted) const {
-    // Paths are compared as strings now (is_ancestor_of, get_path_to), so a '/'
-    // inside a name would split into two segments and make two distinct nodes
-    // look like the same path.
+    // A '/' in a name would split into two path segments.
     if (wanted.find('/') != std::string::npos) {
         throw std::logic_error("Node: name '" + wanted + "' cannot contain '/'.");
     }
@@ -85,13 +80,8 @@ NodeRef<Node> Node::add_child(std::unique_ptr<Node>&& child) {
         throw std::logic_error("Node::add_child: '" + name + "' cannot be its own child.");
     }
 
-    // Ancestry is checked by pointer, not by path. Comparing paths cannot tell
-    // two distinct nodes apart, and unnamed nodes all share the path
-    // "/Unnamed Node": asking whether an unnamed orphan was an ancestor of
-    // another unnamed orphan therefore answers yes, and the tree could never be
-    // built out of nodes that were never named - which is what an unnamed node
-    // is for. get_path()/is_ancestor_of() stay for what they are good at,
-    // comparing paths that came from somewhere else.
+    // Ancestry is checked by pointer, not by path: unnamed nodes all share the
+    // path "/Unnamed Node", so a path comparison cannot tell two of them apart.
     for (const Node* up = this; up != nullptr; up = up->parent) {
         if (up == child.get()) {
             throw std::logic_error("Node::add_child: '" + child->name + "' is an ancestor of '"
@@ -134,8 +124,7 @@ std::unique_ptr<Node> Node::remove_child(size_t index) {
     std::unique_ptr<Node> owned = std::move(children[index]);
     children.erase(children.begin() + static_cast<std::ptrdiff_t>(index));
 
-    // Everything after the hole moved down one; the detached child no longer has
-    // a slot here at all.
+    // Everything after the hole moved down one.
     reindex_from(index);
 
     child->parent = nullptr;
@@ -152,9 +141,8 @@ void Node::reindex_from(size_t start) {
 
 std::unique_ptr<Node> Node::steal() {
     if (parent == nullptr) {
-        // A root is owned by whoever created it, or by the SceneManager for an
-        // active scene. Neither is reachable from here, so claiming it here
-        // would be claiming a node whose owner we cannot see.
+        // A root is owned by its creator or the SceneManager, neither reachable
+        // from here.
         throw std::logic_error("Node::steal: '" + name + "' has no parent, so there is no"
             " tree to take it from. Use change_scene(nullptr) or take_scene() to release"
             " a scene root.");
@@ -166,15 +154,15 @@ void Node::free() {
     if (queued_for_deletion) return;
 
     if (parent == nullptr) {
-        // Roots belong to whoever created them - the SceneManager for an active
-        // scene, or the caller's own unique_ptr. Only an owner may destroy one.
+        // A root belongs to its creator or the SceneManager. Only an owner may
+        // destroy one.
         throw std::logic_error("Node::free: '" + name
             + "' has no parent, so the tree does not own it. Use change_scene(nullptr) or"
             " take_scene() to release a scene root.");
     }
 
-    // Unparent now: leaves the tree and stops drawing this frame. Destroyed at the
-    // next drain, which is what keeps this safe from inside a callback.
+    // Unparents now, so it leaves the tree immediately; destroyed at the next
+    // drain.
     queued_for_deletion = true;
     detail::enqueue_detached_deletion(detach_ownership());
 }
@@ -202,22 +190,19 @@ void Node::move_child(size_t from, size_t to) {
         throw std::out_of_range("Node::move_child: Index out of bounds. en: " + name);
     }
 
-    // `to` is the position the node ends up at. After the erase the vector is one
-    // shorter, and its indices already line up with the final positions - the
-    // nodes between `from` and `to` have each shifted down one, which is what
-    // leaves room for the insert. So `to` needs no adjustment either way, and
-    // to == from is a no-op rather than a self-insert.
+    // `to` is the position the node ends up at; after the erase the indices
+    // already line up, so `to` needs no adjustment. to == from is a no-op.
     std::unique_ptr<Node> owned = std::move(children[from]);
     children.erase(children.begin() + static_cast<std::ptrdiff_t>(from));
     children.insert(children.begin() + static_cast<std::ptrdiff_t>(to), std::move(owned));
 
-    // Both halves of this reshuffle moved things, so the whole vector is stale.
+    // Both halves moved things, so the whole vector is stale.
     reindex_from(0);
 }
 
 NodeRef<Node> Node::get_parent() const {
-    // A root has no parent, and the NodeRef(N*) constructor dereferences to read
-    // the id, so it cannot be handed a null.
+    // The NodeRef(N*) constructor dereferences its argument, so a null gets the
+    // empty ref.
     return parent != nullptr ? NodeRef<Node>(parent) : NodeRef<Node>();
 }
 
@@ -237,12 +222,11 @@ Node* Node::resolve_path(const std::string& path) const {
 
     const bool absolute = path.front() == '/';
 
-    // Resolution walks the tree but never mutates it; same const_cast Godot uses
-    // in get_node_or_null().
+    // Resolution walks the tree but never mutates it.
     Node* const self = const_cast<Node*>(this);
 
     // An absolute path is resolved from the topmost ancestor, and its FIRST
-    // segment names that ancestor itself - so get_node(get_path()) round-trips.
+    // segment names that ancestor itself, so get_node(get_path()) round-trips.
     // A relative path starts at this node and its first segment is a child.
     Node* current = absolute ? nullptr : self;
     Node* root = self;
@@ -282,9 +266,8 @@ Node* Node::resolve_path(const std::string& path) const {
 }
 
 bool Node::is_ancestor_of(const std::string& path) const {
-    // Names cannot contain '/', so a path is strictly longer than this node's
-    // and still prefixed by it only when it names a descendant. Equal counts too:
-    // a node is its own ancestor, which is what the old pointer walk reported.
+    // Names cannot contain '/', so a longer path prefixed by mine names a
+    // descendant. A node is also its own ancestor.
     const std::string mine = get_path();
     if (path == mine) return true;
     if (path.size() <= mine.size()) return false;
@@ -323,7 +306,7 @@ std::string Node::get_path_to(const std::string& target) const {
     };
 
     // Both root-first, so the shared prefix is the common ancestor. Working on
-    // strings rather than nodes is what lets this answer for a freed node.
+    // strings lets this answer for a freed node.
     const std::vector<std::string> from_chain = segments(get_path());
     const std::vector<std::string> to_chain = segments(target);
 
@@ -360,22 +343,19 @@ void Node::update(double delta_time) {
 }
 
 void Node::update_layout(const Rect& parent_rect) {
-    // Hands the rect straight to every child. A Control resolves itself first
-    // and then calls back in with its own rect, so children always measure
-    // against the nearest enclosing Control rather than against a rect the
-    // plain nodes in between never computed.
+    // Hands the rect straight to every child. A Control resolves itself first and
+    // calls back in with its own rect.
     for_each_child([&parent_rect](Node* child) { child->update_layout(parent_rect); });
 }
 
 void Node::route_input(std::vector<InputEvent>& events) {
-    // Same guard as update(): a child that handles an event is free to free
-    // itself, and the walk still holds a pointer to it.
+    // Same guard as update(): a child may free itself while the walk holds a
+    // pointer to it.
     const uint64_t my_id = instance_id_;
     if (!detail::NodeRegistry::instance().is_live(my_id)) return;
 
-    // Children in reverse: draw order is child order, so a later sibling draws on
-    // top and must get first refusal. The count is taken once; a child that frees
-    // itself leaves a slot the bounds check skips rather than a stale index.
+    // Children in reverse, so a later sibling (drawn on top) gets first refusal.
+    // The count is taken once; a freed child leaves a slot the bounds check skips.
     for (size_t i = children.size(); i > 0; --i) {
         if (i - 1 >= children.size()) continue;
         children[i - 1]->route_input(events);
@@ -384,8 +364,7 @@ void Node::route_input(std::vector<InputEvent>& events) {
         if (events.empty()) return;
     }
 
-    // This node's own turn, for whatever the children left. Only a script can act
-    // here; a plain Node has no idea what a key means.
+    // This node's turn, for whatever the children left. Only a script can act here.
     if (script) {
         for (size_t i = 0; i < events.size();) {
             if (script->on_input(events[i])) {
@@ -408,32 +387,29 @@ void Node::route_unhandled_input(const InputEvent& event) {
 }
 
 void Node::draw(ConsoleRenderer& renderer, const Rect& clip) {
-    // Traversal is only the children: a script has no drawing hook, so nothing
-    // here calls user code that could free this node mid-frame. for_each_child
-    // is already safe against a child removing a sibling as it draws.
+    // Only the children: a script has no drawing hook, so no user code runs that
+    // could free this node mid-frame.
     for_each_child([&renderer, &clip](Node* child) { child->draw(renderer, clip); });
 }
 
 void Node::attach_script(std::unique_ptr<ScriptBase> new_script) {
     if (!new_script) return;
 
-    // Sealed on the first successful attach and never reopened, so a script
-    // lives exactly as long as its node. This is the rule ScriptRef's cast-free
-    // script() depends on: see Core/ScriptRef.hpp.
+    // Sealed on the first successful attach and never reopened, so a script lives
+    // as long as its node. ScriptRef::script() depends on this.
     if (script_sealed) {
         throw std::logic_error("Node::attach_script: '" + name + "' already has a script, and a script"
             " is kept for as long as its node. Detaching does not exist, so build the subtree"
             " before handing the node to a scene.");
     }
 
-    // Throws if the Script isn't for this NodeType. Checked before anything is
-    // stored or sealed, so a rejected attach leaves the node exactly as it was.
+    // Throws if the script is not for this node type, before anything is stored or
+    // sealed.
     new_script->bind_to(this);
     script = std::move(new_script);
     script_sealed = true;
 
-    // Unconditional now: binding only happens while building, which is exactly
-    // when this is worth saying.
+    // Unconditional: binding only happens while building.
     script->on_attached();
 }
 

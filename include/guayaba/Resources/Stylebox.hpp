@@ -13,9 +13,8 @@
 namespace guayaba {
 
 /*
-    Four insets in cells, all clamped to zero or more. This is both the padding
-    inside a border and the gap a control leaves for its children: a Panel with
-    a content margin of 1 puts its title one column in from the frame.
+    Four insets in cells, all clamped to zero or more: the padding inside a border
+    and the gap a control leaves for its children.
 */ 
 struct EdgeSize {
     int left = 0;
@@ -40,27 +39,17 @@ public:
 
     StyleBox();
 
-    // Renders this theme into area: the fill, then the frame on top of it. Both
-    // go through the renderer's batch primitives, so this class holds no drawing
-    // loops of its own and cannot disagree with the renderer about clipping.
-    //
-    // clip is the region drawing is confined to and area the box's own extent.
-    // They are separate because the box may be larger than whatever contains it.
+    // Renders this theme into area: the fill, then the frame on top. clip is the
+    // region drawing is confined to; area is the box's own extent.
     void apply(ConsoleRenderer& renderer, const Rect& area, const Rect& clip) const;
 
-    // The area left for content once the border and margins are taken off.
-    // Empty when the box is too small to hold anything, which a caller should
-    // treat as "draw nothing" rather than as a negative size to compensate for.
+    // The area left for content once the border and margins are taken off; empty
+    // when the box is too small.
     Rect get_content_rect(const Rect& area) const;
 
-    // What get_content_rect takes off: the border on both sides plus both
-    // margins. This is the space a caller has to add to a content size to get
-    // the box that will hold it.
-    //
-    // The border is not clamped the way get_content_rect clamps it, because
-    // there is no area to clamp against yet. That errs towards reserving a
-    // frame at most as thick as was asked for, so a box sized from this can
-    // come out with more room than it needs but never clips its own content.
+    // The border on both sides plus both margins: the space to add to a content
+    // size to get the box that holds it. The border is not clamped against an area,
+    // so a box sized from this may have more room than needed but never clips.
     Vec2 get_frame_size() const {
         return Vec2{content_margin.horizontal() + border_width * 2,
                     content_margin.vertical() + border_width * 2};
@@ -78,8 +67,7 @@ public:
         return border_style != StyleBorder::NONE && border_color.has_value() && border_width > 0;
     }
 
-    // Passing an empty optional clears the color, which is how you fall back to
-    // whatever the terminal already had in those cells.
+    // An empty optional clears the color, falling back to whatever the terminal had.
     void set_background_color(std::optional<uint16_t> color) { background_color = color; }
     void set_background_color(const std::string& color_name) {
         background_color = Color::from_name(color_name);
@@ -92,14 +80,12 @@ public:
     }
     void clear_border_color() { border_color.reset(); }
 
-    // Negative widths are meaningless, so they clamp to zero rather than being
-    // stored and then having to be defended against at every draw.
+    // Negative widths clamp to zero.
     void set_border_width(int width) { border_width = width < 0 ? 0 : width; }
     void set_border_style(StyleBorder style) { border_style = style; }
 
-    // Setting the style back to NONE also drops the width and radius: has_border()
-    // already ignores them, and leaving stale values around makes a later
-    // switch back to a visible style resurrect a thickness nobody asked for.
+    // Also drops the width and radius, so switching back to a visible style does
+    // not resurrect a stale thickness.
     void set_no_border() {
         border_style = StyleBorder::NONE;
         border_width = 0;
@@ -108,9 +94,7 @@ public:
 
     void set_corner_radius(int radius) { corner_radius = radius < 0 ? 0 : radius; }
 
-    // Each inset is floored at zero, matching the "clamped to zero or more"
-    // contract EdgeSize documents. A negative margin is a caller bug, and
-    // storing it would grow the content rect past the box it came from.
+    // Each inset is floored at zero, matching EdgeSize's contract.
     void set_content_margin(const EdgeSize& margin) {
         content_margin.left = margin.left < 0 ? 0 : margin.left;
         content_margin.top = margin.top < 0 ? 0 : margin.top;

@@ -3,7 +3,7 @@
 
 namespace guayaba {
 
-// Replaces Windows COORD
+// Integer 2D position/size.
 struct Vec2 {
     int x = 0;
     int y = 0;

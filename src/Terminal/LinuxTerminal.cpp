@@ -26,11 +26,6 @@ int LinuxTerminal::color_id_to_ansi_bg(uint16_t id) {
     return 100 + (id - 8);
 }
 
-// Map ANSI color order to match our Color IDs:
-// Our:  0=Black, 1=Red, 2=Green, 3=Yellow, 4=Blue, 5=Magenta, 6=Cyan, 7=White
-// ANSI: 0=Black, 1=Red, 2=Green, 3=Yellow, 4=Blue, 5=Magenta, 6=Cyan, 7=White
-// They match perfectly!
-
 void LinuxTerminal::enable_raw_mode() {
     struct termios raw;
     tcgetattr(STDIN_FILENO, &raw);
@@ -82,7 +77,6 @@ bool LinuxTerminal::parse_sgr_mouse(const char* buf, int len) {
     if (i >= len) return false;
 
     bool is_release = (buf[i] == 'm');
-    // bool is_press = (buf[i] == 'M');
 
     // SGR coordinates are 1-based, convert to 0-based
     mouse_pos = {cx - 1, cy - 1};
@@ -95,7 +89,7 @@ bool LinuxTerminal::parse_sgr_mouse(const char* buf, int len) {
 
     if (is_wheel) {
         // Bit 0 says which way: 64 is up, 65 is down. A notch is an occurrence,
-        // not a state, so it gets its own event type.
+        // so it gets its own event type.
         const int delta = (button & 1) != 0 ? -1 : 1;
         wheel_delta += delta;
 
@@ -178,13 +172,13 @@ std::size_t LinuxTerminal::consume_input_bytes() {
             const std::string rest = pending_bytes.substr(index);
 
             if (rest.size() == 1) {
-                // A lone ESC at the end of the read is ambiguous; leave it
-                // pending and let poll_events decide next poll.
+                // A lone ESC at the end of the read is ambiguous; leave it for
+                // poll_events.
                 return index;
             }
 
-            // SGR mouse report, handled before the key tables because it also
-            // starts with ESC [ and would otherwise look like a partial CSI.
+            // SGR mouse report, handled before the key tables: it also starts with
+            // ESC [ and would look like a partial CSI.
             if (rest.size() >= 3 && rest[1] == '[' && rest[2] == '<') {
                 std::size_t end = 3;
                 while (end < rest.size() && rest[end] != 'M' && rest[end] != 'm') ++end;
@@ -199,22 +193,19 @@ std::size_t LinuxTerminal::consume_input_bytes() {
             bool shift = false, alt = false, ctrl = false;
             const std::size_t used = keyseq::match_escape(rest, key, shift, alt, ctrl);
             if (used == 0) {
-                // A complete CSI/SS3 sequence we do not map: drop it whole rather
-                // than re-parse its bytes as keys.
+                // A complete CSI/SS3 sequence we do not map: drop it whole.
                 const std::size_t unknown = keyseq::unknown_sequence_length(rest);
                 if (unknown > 0) {
                     index += unknown;
                     continue;
                 }
-                // An incomplete sequence of a shape we recognise: wait for the
-                // rest rather than guessing.
+                // An incomplete sequence of a recognised shape: wait for the rest.
                 const bool sequence_start =
                     rest.size() >= 2 && (rest[1] == '[' || rest[1] == 'O');
                 if (sequence_start) return index;
 
-                // Otherwise the ESC was the Escape key and the next byte (if any)
-                // is its own key - which is what Alt+letter looks like on the
-                // wire. Emitting it now avoids stalling on a 2-byte tail forever.
+                // Otherwise the ESC was the Escape key; the next byte is its own
+                // key (Alt+letter on the wire).
                 emit_key(Key::ESCAPE, true, 0, false, false, false);
                 ++index;
                 continue;
@@ -227,8 +218,7 @@ std::size_t LinuxTerminal::consume_input_bytes() {
         }
 
         // --- Control codes ----------------------------------------------------
-        // These are what a terminal sends for ctrl+letter and the editing keys,
-        // so each is a named key rather than a character to insert.
+        // What a terminal sends for ctrl+letter and the editing keys.
         Key control_key = Key::NONE;
         bool is_ctrl_letter = false;
         switch (byte) {

@@ -13,14 +13,9 @@ Rect PanelContainer::panel_content_rect() const {
 }
 
 Vec2 PanelContainer::get_minimum_size() const {
-    // The border and margins are added on top of whatever the child needs, rather
-    // than being treated as padding to be centred inside. They are the panel's
-    // own frame, so a panel squeezed below them has to lose content rather than
-    // lose its edges.
-    //
-    // Container::get_minimum_size() already collects the children's minimums, so
-    // this only has to add the frame and re-apply the caller's own minimum on
-    // top - the same floor, one level up.
+    // The border and margins are added on top of the child's minimum, not centred
+    // inside it: a panel squeezed below the frame loses content, not edges.
+    // Control's own minimum floors it again.
     const Vec2 content = Container::get_minimum_size();
     const Vec2 frame = stylebox.get_frame_size();
 
@@ -31,21 +26,17 @@ Vec2 PanelContainer::get_minimum_size() const {
 void PanelContainer::update_layout(const Rect& parent_rect) {
     resolve_rect(parent_rect);
 
-    // No content_rect() here: the child takes the whole area inside the frame
-    // rather than a block centred inside it. get_rect() is already the panel's
-    // own rect, so the offset places the child at the content rect's corner.
+    // Not content_rect(): the child takes the whole area inside the frame, not a
+    // centred block.
     const Rect content = panel_content_rect();
     for (size_t i = 0; i < children.size(); ++i) place_child(i, content);
 }
 
 void PanelContainer::draw(ConsoleRenderer& renderer, const Rect& clip) {
-    // The panel itself is drawn exactly as large as it is and is clipped only by
-    // whatever its ancestors allowed - clip_children governs what this node
-    // contains, not whether the node itself is visible.
+    // Drawn exactly as large as it is, clipped only by its ancestors.
     stylebox.apply(renderer, get_rect(), clip);
 
-    // Hand back to Control so the children are drawn with the clip it narrows
-    // for them.
+    // Hand back to Control so children use the clip it narrows for them.
     Control::draw(renderer, clip);
 }
 

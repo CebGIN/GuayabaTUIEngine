@@ -5,7 +5,7 @@
 
 namespace guayaba {
 
-// Replaces Windows CHAR_INFO
+// One grid cell: a character plus foreground and background color ids.
 struct TermChar {
     wchar_t character = L' ';
     uint16_t foreground = 7;   // White (default)

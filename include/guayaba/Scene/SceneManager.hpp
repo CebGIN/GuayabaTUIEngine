@@ -61,12 +61,10 @@ class SceneManager {
         void stop_running();
 
         /*
-            Frame rate cap for the loop. 0 (the default) leaves it uncapped: the
-            loop runs as fast as the machine can, which is what a scene that
-            measures its own frame time wants. A positive value makes the loop
-            sleep out the unused part of each frame's budget, so a scene that
-            only changes on an interval does not burn a core redrawing unchanged
-            frames.
+            Frame rate cap for the loop. 0 (the default) leaves it uncapped, for a
+            scene that measures its own frame time. A positive value makes the loop
+            sleep out the unused part of each frame's budget, so a scene that only
+            changes on an interval does not burn a core redrawing unchanged frames.
 
             Set before start_running() (or any time from a running scene). Safe
             to change between frames; the new value is read on the next one.

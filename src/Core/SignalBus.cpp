@@ -2,12 +2,9 @@
 
 namespace guayaba {
 
-// Leaked on purpose, like detail::NodeRegistry: the bus has to outlive whatever is
-// still emitting from a destructor or during static teardown, and a destroyed bus
-// would leave every live emitter pointing at freed storage.
+// Leaked so the bus outlives whatever is still emitting from a destructor or
+// during static teardown.
 SignalBus& SignalBus::get_instance() {
-    // Deliberately leaked, for the reason NodeRegistry::instance() is: the bus has
-    // to outlive whatever is still emitting from a destructor.
     static SignalBus* instance = new SignalBus();
     return *instance;
 }

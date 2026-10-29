@@ -14,45 +14,17 @@
 namespace guayaba {
 
 /*
-    A Control that shows text inside a StyleBox.
+    A Control that shows word-wrapped text inside a StyleBox. Unlike
+    NodeTextMatrix it is laid out, so it takes part in anchors and clipping.
 
-    Differs from NodeTextMatrix in the two things a text node usually wants:
-    it is laid out (so it participates in anchors and clipping rather than
-    living at a raw global position), and its text is word-wrapped to whatever
-    width the anchors give it.
+    The text is held twice: raw_text is what the caller set, wrapped_lines is
+    wrap() of raw_text at the resolved content width and what is drawn.
 
-    The text is held twice, and the distinction matters:
+    Height comes from the anchors, not the wrap, so excess lines are clipped.
 
-        raw_text       what the caller set - the source of truth
-        wrapped_lines  derived by wrap() from raw_text at the resolved content
-                      width - what actually gets drawn
-
-    Height comes from the anchors, not from the wrap, so a Label can be made
-    shorter than its text needs and the excess lines are clipped. That also
-    means the wrap never feeds back into size, so there is no circularity
-    between wrapping and measuring.
-
-    fit_content is the exception, and it is measured rather than wrapped. A
-    fitting Label reports the size its text wants instead of a minimum of zero,
-    so a container can make room for it:
-
-        fit_content = false   no minimum of its own; wraps into whatever the
-                              layout gives it, and clips the overflow. The
-                              default, and what a Label in a fixed frame wants.
-
-        fit_content = true    the minimum is the text's own extent: as wide as
-                              its longest line, and as tall as the lines it
-                              takes. Measured from raw_text alone, so the answer
-                              is the same whatever size the layout hands out -
-                              a Label squeezed narrow reports what the text
-                              needs, not what it was squeezed into.
-
-    The minimum is a floor, not a target: set_size() and the anchors still say
-    how big the Label actually gets, and this only stops it getting smaller than
-    the text.
-
-    Either way the sizebox frame is added on top, so the text fits inside the
-    border and margins rather than under them.
+    fit_content is the exception: when on, the Label's minimum is the text's own
+    extent (measured from raw_text, independent of the size handed out) so a
+    container can make room for it. Either way the StyleBox frame is added on top.
 */
 class Label : public Control {
 protected:
@@ -64,30 +36,22 @@ protected:
     uint16_t text_color = 7;      // White, the TermChar default
     uint16_t background_color = 0; // Black, the TermChar default
 
-    // Whether this Label reports the size its text wants. See the class comment.
+    // Whether this Label reports the size its text wants.
     bool fit_content = false;
 
-    // Measured when fit_content is on, cached because get_minimum_size() runs on
-    // every layout pass and the text does not change between passes.
+    // Cached text extent; get_minimum_size() runs every layout pass.
     mutable Vec2 measured_size{0, 0};
     mutable bool measured_size_valid = false;
 
-    // The extent of raw_text, cached. Delegates to TextWrap::measure_text; the
-    // wrapper exists so the cached value lives next to the text it came from.
+    // Extent of raw_text, cached; delegates to TextWrap::measure_text.
     Vec2 measure_text() const;
 
-    // Where the text goes: the box's rect minus its border and margins. Empty
-    // when the box is too small to hold anything, which the draw treats as
-    // "draw no text" rather than as something to compensate for.
+    // The box's rect minus its border and margins; empty when the box is too small.
     Rect content_rect() const;
 
-    // The region the text is drawn into. Horizontal overflow is left to an
-    // ancestor to clip - a word too wide for the box spills and the nearest
-    // clipping ancestor cuts it - while vertical overflow is cut here, at the
-    // label's own bottom, once clip_children says the label is a boundary.
-    //
-    // Keeping the incoming clip's x-range but taking the label's y-range is what
-    // makes those two axes behave differently on purpose.
+    // The region the text is drawn into: the incoming clip's x-range and the
+    // label's own y-range, so horizontal overflow is left to an ancestor and
+    // vertical overflow is cut at the label's bottom.
     Rect text_clip(const Rect& incoming) const;
 
 public:
@@ -99,17 +63,14 @@ public:
 
     // --- Size ----------------------------------------------------------------
 
-    // With fit_content on, this is the text's own extent plus the stylebox
-    // frame; with it off, it is whatever the caller imposed.
+    // The text extent plus StyleBox frame when fit_content is on; otherwise the imposed size.
     Vec2 get_minimum_size() const override;
 
     // --- Fit content ---------------------------------------------------------
 
     bool get_fit_content() const { return fit_content; }
 
-    // Turning it on makes this Label a minimum its parents can lay out around,
-    // rather than a fixed-size box that clips. Turning it off returns it to a
-    // zero minimum, which lets a container give it whatever space is going.
+    // On: the Label reports the text's extent as its minimum. Off: a zero minimum.
     void set_fit_content(bool enabled) {
         if (fit_content == enabled) return;
         fit_content = enabled;
@@ -119,14 +80,12 @@ public:
 
     // --- Text ---------------------------------------------------------------
 
-    // Re-wraps against the current content width, so a change here is visible
-    // this frame without waiting for the next layout pass.
+    // Re-wraps against the current content width immediately.
     void set_text(const std::string& text);
 
     const std::string& get_text() const { return raw_text; }
 
-    // The lines as last wrapped. Derived state; read it to inspect what is
-    // being drawn, but set raw_text through set_text instead.
+    // The lines as last wrapped. Derived state; set text through set_text().
     const std::vector<std::string>& get_wrapped_lines() const { return wrapped_lines; }
 
     void set_text_color(uint16_t color) { text_color = color; }
@@ -142,8 +101,7 @@ public:
     StyleBox& get_stylebox() { return stylebox; }
     const StyleBox& get_stylebox() const { return stylebox; }
 
-    // A StyleBox change can move the content rect, so the wrap is recomputed
-    // from the current text rather than left stale.
+    // A StyleBox change moves the content rect, so the wrap is recomputed.
     void set_stylebox(StyleBox new_stylebox);
 };
 

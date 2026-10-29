@@ -11,8 +11,7 @@ namespace guayaba {
 
 namespace {
 
-// The thickest frame that still leaves a cell of content on each side. A box
-// one cell across has no interior to frame, so its border collapses to nothing.
+// The thickest frame that still leaves a cell of content on each side.
 int max_border_width(const Rect& area) {
     return std::min(area.size.x, area.size.y) <= 1
                ? 0
@@ -36,8 +35,7 @@ BorderGlyphs glyphs_for(StyleBorder style, int corner_radius) {
             return {L'═', L'║', L'╔', L'╗', L'╚', L'╝'};
         case StyleBorder::HEAVY:
             return {L'█', L'█', L'█', L'█', L'█', L'█'};
-        // Rounded corners only exist once a radius is set. Below that the style
-        // degrades to a plain square frame.
+        // Rounded corners only exist once a radius is set.
         case StyleBorder::ROUNDED:
             if (corner_radius > 0) return {L'─', L'│', L'╭', L'╮', L'╰', L'╯'};
             return {L'-', L'|', L'+', L'+', L'+', L'+'};
@@ -48,10 +46,8 @@ BorderGlyphs glyphs_for(StyleBorder style, int corner_radius) {
     }
 }
 
-// Picks the joint glyph for a corner cell. At cell resolution a corner is a
-// single cell, so corner_radius cannot bend a curve here: it only decides
-// whether glyphs_for() hands back arc joints or the style's square ones.
-// Real curvature would need sub-cell geometry this grid does not have.
+// Picks the joint glyph for a corner cell. At cell resolution a corner is one
+// cell, so corner_radius only chooses between arc joints and square ones.
 wchar_t corner_glyph(const BorderGlyphs& g, bool on_top, bool on_left) {
     if (on_top) return on_left ? g.top_left : g.top_right;
     return on_left ? g.bottom_left : g.bottom_right;
@@ -80,7 +76,7 @@ void ConsoleRenderer::clear_buffer() {
     TermChar empty_char;
     empty_char.character = L' ';
     empty_char.foreground = 15;  // BRIGHT_WHITE
-    empty_char.background = 15;  // BRIGHT_WHITE (white background default, matching original)
+    empty_char.background = 15;  // BRIGHT_WHITE
 
     for (size_t i = 0; i < screen_buffer.size(); ++i) {
         screen_buffer[i] = empty_char;
@@ -89,8 +85,7 @@ void ConsoleRenderer::clear_buffer() {
 
 void ConsoleRenderer::put_char(Vec2 pos, wchar_t character, uint16_t fg, uint16_t bg,
                                const Rect& clip) {
-    // The buffer bound and the clip are independent: the clip can sit well
-    // inside the buffer, or outside it entirely.
+    // The buffer bound and the clip are independent.
     if (clip.is_empty()) return;
     if (pos.x < 0 || pos.x >= console_buffer_size.x ||
         pos.y < 0 || pos.y >= console_buffer_size.y) return;
@@ -106,10 +101,7 @@ void ConsoleRenderer::put_text(Vec2 origin, const std::vector<std::string>& line
                                uint16_t bg, const Rect& clip) {
     if (lines.empty() || clip.is_empty()) return;
 
-    // Widths are codepoint counts, not byte counts: a multi-byte character is one
-    // cell. Measuring by bytes would reserve a cell per byte and push the rest of
-    // the line right, which is what punched holes into any line holding an
-    // accent, an arrow or a box glyph.
+    // Widths are codepoint counts, not byte counts: a multi-byte character is one cell.
     int widest = 0;
     for (const std::string& line : lines) {
         widest = std::max(widest, text_width(line));
@@ -120,8 +112,7 @@ void ConsoleRenderer::put_text(Vec2 origin, const std::vector<std::string>& line
     const Rect visible = content.intersection(clip);
     if (visible.is_empty()) return;
 
-    // Offsets and limits, worked out once before any character is touched, so
-    // the loop below walks only what is actually on screen.
+    // Offsets and limits, so the loop walks only what is on screen.
     const int ox = visible.left() - content.left();
     const int oy = visible.top() - content.top();
     const int last_col = ox + visible.size.x;
@@ -131,9 +122,8 @@ void ConsoleRenderer::put_text(Vec2 origin, const std::vector<std::string>& line
         if (line_index >= (int)lines.size()) break;
 
         const std::string& line = lines[line_index];
-        // Walk codepoints rather than bytes so one glyph is one column. Columns
-        // left of the window are still decoded (to keep the cell index aligned)
-        // but not drawn; a short line simply stops contributing.
+        // Walk codepoints so one glyph is one column. Columns left of the window
+        // are decoded but not drawn.
         std::size_t byte = 0;
         int col = 0;
         while (byte < line.size() && col < last_col) {
@@ -173,9 +163,8 @@ void ConsoleRenderer::draw_box(const Rect& area, StyleBorder style, uint16_t fg,
         const Rect band = area.grown(-ring, -ring);
         if (band.is_empty()) break;
 
-        // Only the part of this ring that survives the clip is walked. The
-        // corners still see their own band geometry, so a ring cut in half
-        // keeps drawing the same joint it would have drawn when whole.
+        // Walk only the part of the ring that survives the clip; corners keep
+        // their own band geometry.
         const Rect visible = band.intersection(clip);
         if (visible.is_empty()) continue;
 
@@ -201,10 +190,8 @@ void ConsoleRenderer::draw_box(const Rect& area, StyleBorder style, uint16_t fg,
                 if ((on_top || on_bottom) && (on_left || on_right)) {
                     glyph = corner_glyph(g, on_top, on_left);
                 } else if (style == StyleBorder::DASHED) {
-                    // Break each run against the cell it starts at, so every
-                    // edge opens with a dash. Phasing off the absolute
-                    // coordinate instead would blank a whole side whenever the
-                    // box's parity happened to skip every other row or column.
+                    // Phase each run from the cell it starts at, so every edge
+                    // opens with a dash.
                     const int offset = (on_top || on_bottom) ? (x - x0) : (y - y0);
                     if (offset % 2 != 0) continue;
                 }

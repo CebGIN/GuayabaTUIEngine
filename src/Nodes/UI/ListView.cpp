@@ -10,8 +10,7 @@ namespace guayaba {
 
 ListView::ListView(const std::string& node_name, Vec2 node_position)
     : Control(node_name, node_position) {
-    // Declared here rather than on demand at the emit, so connect_signal finds
-    // them before anything has fired. Both carry the row index.
+    // Declared here so connect_signal finds them. Both carry the row index.
     declare_signal<int>("selection_changed");
     declare_signal<int>("item_activated");
 
@@ -36,9 +35,8 @@ int ListView::visible_count() const { return content_rect().size.y; }
 void ListView::set_items(std::vector<std::string> new_items) {
     items = std::move(new_items);
 
-    // Both can now point past the end. The cursor is clamped rather than cleared,
-    // so replacing the contents of a live list keeps the user near where they
-    // were; the window is clamped to the new count.
+    // Both can now point past the end: the cursor is clamped rather than cleared,
+    // and the window is clamped to the new count.
     if (items.empty()) {
         selected_index = -1;
     } else {
@@ -78,9 +76,7 @@ void ListView::move_selection(int delta) {
     const int last = static_cast<int>(items.size()) - 1;
     int target;
     if (selected_index < 0) {
-        // Nothing selected: the first move enters the list from the end it moves
-        // toward, which is what makes Down-then-Up feel symmetric on an empty
-        // selection.
+        // Nothing selected: the first move enters from the end it moves toward.
         target = delta > 0 ? 0 : last;
     } else {
         target = std::clamp(selected_index + delta, 0, last);
@@ -126,8 +122,8 @@ void ListView::set_scroll(int offset) {
 
 void ListView::set_stylebox(StyleBox box) {
     stylebox = std::move(box);
-    // The frame is part of the content rect, so the number of visible rows can
-    // change with it and the window has to follow.
+    // The frame is part of the content rect, so the visible-row count can change
+    // and the window must follow.
     clamp_scroll();
 }
 
@@ -157,8 +153,8 @@ bool ListView::on_gui_input(const InputEvent& event) {
         if (event.mouse_button != MouseButton::LEFT) return false;
 
         if (!event.pressed) {
-            // The press was taken; the release is swallowed with it so a click
-            // cannot half-leak to a control behind the list.
+            // The release is swallowed with the press so a click cannot half-leak
+            // to a control behind.
             return true;
         }
 
@@ -176,12 +172,12 @@ bool ListView::on_gui_input(const InputEvent& event) {
     }
 
     if (event.type == InputEvent::Type::MOUSE_WHEEL) {
-        // Decline when there is nothing to scroll, so an enclosing ScrollView
-        // still gets the notch.
+        // Decline when there is nothing to scroll, so an enclosing ScrollView gets
+        // the notch.
         if (static_cast<int>(items.size()) <= visible_count()) return false;
 
         // Roughly a third of a screen per notch, at least one row. Positive wheel
-        // is up, which moves the window toward the top (a smaller offset).
+        // moves toward the top.
         const int step = std::max(1, visible_count() / 3);
         set_scroll(scroll_offset - event.wheel_delta * step);
         return true;
@@ -236,9 +232,8 @@ void ListView::draw_row(ConsoleRenderer& renderer, const Rect& content, int row,
                         const Rect& clip) {
     const int y = content.pos.y + row;
 
-    // The whole row, not just the text: the selection band has to span the content
-    // rect, and the empty cells past a short item are part of the band. Drawn per
-    // cell because each cell's colour depends on the row it is in.
+    // The whole row, not just the text: the selection band spans the content rect
+    // and the empty cells past a short item are part of it. Drawn per cell.
     std::size_t byte = 0;
     for (int column = 0; column < content.size.x; ++column) {
         wchar_t glyph = L' ';
@@ -253,8 +248,7 @@ void ListView::draw_row(ConsoleRenderer& renderer, const Rect& content, int row,
 }
 
 void ListView::draw(ConsoleRenderer& renderer, const Rect& clip) {
-    // The list is drawn exactly as large as it is and is clipped only by what its
-    // ancestors allowed.
+    // Drawn exactly as large as it is, clipped only by its ancestors.
     stylebox.apply(renderer, get_rect(), clip);
 
     const Rect content = content_rect();
@@ -264,7 +258,7 @@ void ListView::draw(ConsoleRenderer& renderer, const Rect& clip) {
     }
 
     // A StyleBox background is the row surface when it has one; otherwise the
-    // TermChar default black.
+    // TermChar default.
     const uint16_t row_background =
         stylebox.has_background() ? *stylebox.get_background_color() : 0;
 
@@ -276,8 +270,7 @@ void ListView::draw(ConsoleRenderer& renderer, const Rect& clip) {
         const bool is_selected = index == selected_index;
         const auto tint = item_colors.find(index);
 
-        // Selection wins over a per-item tint, so the cursor band stays legible
-        // even on a row that was coloured for another reason.
+        // Selection wins over a per-item tint, so the cursor band stays legible.
         const uint16_t fg = is_selected ? selection_text_color
                           : tint != item_colors.end() ? tint->second
                                                       : text_color;
@@ -286,8 +279,8 @@ void ListView::draw(ConsoleRenderer& renderer, const Rect& clip) {
         draw_row(renderer, content, row, items[index], fg, bg, clip);
     }
 
-    // Hand back to Control so the script hook still runs and children are drawn
-    // with the clip Control narrows for them.
+    // Hand back to Control so the script hook runs and children use the clip
+    // Control narrows for them.
     Control::draw(renderer, clip);
 }
 

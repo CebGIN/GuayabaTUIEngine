@@ -29,10 +29,8 @@ class ScriptRef;
 
 namespace detail {
 
-// Detects the marker Script<N> carries, so that attach_script<T>() can reject a T
-// written against ScriptBase directly with a readable message instead of a
-// "no type named node_type" cascade. The body that would need node_type is only
-// instantiated once this says yes, so the failure lands on the static_assert.
+// Detects the marker Script<N> carries, so attach_script<T>() can reject a T
+// written against ScriptBase directly with a static_assert message.
 template<typename T, typename = void>
 struct has_node_type : std::false_type {};
 
@@ -173,40 +171,25 @@ public:
     virtual void update(double delta_time);
 
     // --- Layout -------------------------------------------------------------
-    // Once per frame, before draw(). The root is handed the console rect and
-    // each node passes down whatever space its children should resolve against,
-    // so a Control always measures against its nearest laid-out ancestor rather
-    // than having to walk the tree itself.
-    //
-    // The base implementation forwards parent_rect unchanged: a Control nested
-    // under plain Node2D wrappers still resolves against the last real
-    // Control above, not against a rect those wrappers never computed.
-    //
-    // This is "lay my children out against the rect I'm given", nothing more.
-    // A subclass that needs to resolve itself against that rect first, and then
-    // hand its own rect down instead, calls back into this with its resolved
-    // rect - see Control::update_layout, which is why there is only one virtual
-    // here and no separate propagate step.
+    // Once per frame, before draw(). Each node passes down the space its children
+    // resolve against, so a Control measures against its nearest laid-out ancestor
+    // without walking the tree. The base forwards parent_rect unchanged; a subclass
+    // that resolves itself first re-enters this virtual with its own rect (see
+    // Control::update_layout).
     virtual void update_layout(const Rect& parent_rect);
 
     /*
-        Hands this subtree the frame's input events, for controls to consume.
-
-        The base visits children in REVERSE order (a later sibling draws on top,
-        so it gets first refusal), then offers what is left to this node's script
-        via on_input. A control overrides this to add its own hover/focus handling
-        before the script gets a turn. Consuming an event means erasing it from
-        the vector, so the same press cannot reach two controls.
-
-        The frame loop calls this after update_layout, so the rects hit-tested are
-        the ones about to be drawn.
+        Hands this subtree the frame's input events. Children are visited in reverse
+        (topmost first), then what is left goes to this node's script via on_input.
+        Consuming an event erases it from the vector, so it cannot reach another
+        control. The frame loop calls this after update_layout, so hit-tested rects
+        are the ones about to be drawn.
     */
     virtual void route_input(std::vector<InputEvent>& events);
 
     /*
-        Delivers one event nobody consumed to this subtree. The base recurses in
-        forward order and calls this node's script on_unhandled_input. Not
-        consumable: by the time an event gets here, every control has declined it.
+        Delivers one unconsumed event to this subtree in forward order, calling this
+        node's script on_unhandled_input. Not consumable.
     */
     virtual void route_unhandled_input(const InputEvent& event);
 
@@ -278,13 +261,10 @@ public:
 
     // --- virtual transversals ------------------------------------------------------------
 
-    // clip is the region drawing is currently confined to, in buffer
-    // coordinates, and is passed down to every child. A node passes it through
-    // unchanged; a Control that clips narrows it by its own rect first (see
-    // Control::draw).
-    //
-    // Scripts have no drawing hook: how a node looks is decided by the node
-    // itself, so overriding draw() is the only way to draw.
+    // clip is the region drawing is confined to, in buffer coordinates, passed down
+    // to every child. A Control that clips narrows it by its own rect first (see
+    // Control::draw). Scripts have no drawing hook; overriding draw() is the only way
+    // to draw.
     virtual void draw(ConsoleRenderer& renderer, const Rect& clip);
 
     virtual void invalidate_cache_recursively();

@@ -15,23 +15,16 @@
 namespace guayaba {
 
 /*
-    Non-owning, dangling-safe handle to a Node. Eight bytes: a packed id, no
-    pointer, so it cannot dangle and cannot silently alias a node that was
-    constructed into the same address afterwards.
+    Non-owning, dangling-safe handle to a Node. Stores a packed id rather than a
+    pointer, so it cannot dangle or alias a different node built into the same
+    address.
 
-    WHEN YOU NEED THIS
-    Raw N* is the right handle for anything inside the subtree you built: an
-    ancestor of the holder, or anything the holder's subtree owns. That
-    containment is structural, because the tree owns its children outright.
+    A raw N* is the right handle inside the subtree you built. Across subtrees it
+    is not: the caller may free that subtree at any time. Store a NodeRef there and
+    test it.
 
-    A reference that crosses that boundary cannot be structural. The clearest
-    case is a node handed to a builder as an argument: the caller may free that
-    subtree at any time, and nothing in the receiving subtree keeps it alive.
-    Store a NodeRef there and test it.
-
-    A NodeRef names one node for its whole life. It is built from a pointer and
-    it never changes what it points at, so a reference has to arrive with its
-    target - which in practice means through the constructor:
+    A NodeRef names one node for its whole life, so the target has to arrive with
+    it - in practice through the constructor:
 
         class Follower : public Script<Node2D> {
         public:
@@ -42,21 +35,10 @@ namespace guayaba {
             NodeRef<Node2D> target;   // lives in someone else's subtree
         };
 
-        body->attach_script<Follower>(body_in_another_subtree);
-
-    attach_script forwards its arguments to S, so the target reaches the script
-    the same way any other constructor argument would.
-
-    GUARANTEES
-    get() returns nullptr once the node has been destroyed, from the moment its
-    destructor runs. It never returns a pointer to a different node. It does not
-    keep the node alive, and it says nothing about whether the node is still in
-    the scene tree - a live handle to an orphan is still live.
-
-    WHAT IT DOES NOT DO
-    It does not detect a reference that is valid but stale, e.g. a node that was
-    reparented somewhere else. Use get_node_or_null() when you want to resolve by
-    relationship rather than identity.
+    get() returns nullptr once the node has been destroyed, and never a pointer to
+    a different node. It does not keep the node alive and says nothing about
+    whether the node is still in the tree. Use get_node_or_null() when you want to
+    resolve by relationship rather than identity.
 */
 template<typename N>
 class NodeRef {
@@ -65,28 +47,17 @@ class NodeRef {
 public:
     NodeRef() = default;
 
-    // REQUIRES A VALID N*. The pointer is dereferenced to take its id, so a null
-    // or already-destroyed argument is undefined behaviour rather than an empty
-    // handle: this class trusts its caller to know what it is pointing at.
+    // Requires a valid N*: the pointer is dereferenced to take its id.
     explicit NodeRef(N* raw) : id_(raw->instance_id()) {}
 
-    // Widening only: NodeRef<Derived> becomes NodeRef<Base>. The id is the same
-    // object either way, and Base is what NodeRef<Base>::get() can do soundly
-    // with it. Narrowing is left out on purpose - that is what get() and
-    // get_node<T>() are for, and they check.
+    // Widening only: NodeRef<Derived> becomes NodeRef<Base>. Narrowing is left to
+    // get() and get_node<T>().
     template<typename D, typename = std::enable_if_t<std::is_base_of<N, D>::value>>
     NodeRef(const NodeRef<D>& derived) : id_(derived.id()) {}
 
-    // The static_cast is sound because three things hold at once. The id was
-    // captured from an N*, so the object was an N at capture. A resolving id is
-    // that same object, because unregister_node() zeroes the generation and
-    // register_node() hands out a fresh monotonic one, so a reused address cannot
-    // answer. And an object's dynamic type cannot change over its lifetime.
-    //
-    // That chain is also why there is no watch(): a mistyped reference is a
-    // compile error here rather than a runtime check, and it is the absence of an
-    // untyped capture path that keeps the cast above honest. Give this class back
-    // a Node* parameter and the static_cast silently becomes unsound.
+    // The static_cast is sound: the id was captured from an N*, a resolving id
+    // names that same object (generations never repeat), and an object's dynamic
+    // type cannot change.
     N* get() const {
         Node* node = detail::NodeRegistry::instance().resolve(id_);
         return node ? static_cast<N*>(node) : nullptr;
@@ -109,14 +80,9 @@ private:
 };
 
 /*
-    The Node member templates whose bodies hand back a NodeRef live here, not in
-    Nodes/Node.hpp. Returning one by value needs the complete type, and Node.hpp
-    cannot include this header - NodeRef.hpp includes Node.hpp - so they are
-    declared up there and defined down here. Same arrangement
-    ScriptRef.hpp uses for attach_script().
-
-    Node::get_script_as<S>() is the mirror case and lives in ScriptRef.hpp,
-    because its return type is a ScriptRef.
+    Node members that return a NodeRef are declared in Nodes/Node.hpp and defined
+    here, because returning one by value needs the complete type and Node.hpp
+    cannot include this header.
 */
 template<typename T, typename... Args>
 NodeRef<T> Node::add_child(Args&&... args) {
@@ -158,8 +124,7 @@ NodeRef<T> Node::get_node(const std::string& path) const {
 template<typename T>
 NodeRef<T> Node::get_node_or_null(const std::string& path) const {
     static_assert(std::is_base_of<Node, T>::value, "T must be a Node type.");
-    // A miss is an empty ref, and the NodeRef(N*) constructor cannot be handed
-    // the nullptr resolve_path returns.
+    // A miss is an empty ref; the NodeRef(N*) constructor cannot take nullptr.
     T* found = static_cast<T*>(resolve_path(path));
     return found != nullptr ? NodeRef<T>(found) : NodeRef<T>();
 }

@@ -12,47 +12,22 @@
 namespace guayaba {
 
 /*
-    A Container that draws a panel and stretches its child across it.
+    A Container that draws a StyleBox panel and stretches its child across the
+    inside of it.
 
-    The one Container that fills rather than centres. Where a Container gives its
-    child a block the size of the child's own minimum and leaves the rest as
-    padding, a PanelContainer hands the child everything inside the panel's
-    border and margins:
+    The child gets everything inside the panel's border and margins, so Grow::Both
+    or FullRect spans the panel exactly. The margin counts towards the minimum
+    size, unlike a plain Container's padding.
 
-        +---------------------------+
-        | +-----------------------+ |
-        | |                       | |
-        | |         child         | |  <- child fills the content rect
-        | |                       | |
-        | +-----------------------+ |
-        +---------------------------+
-          ^ StyleBox: background, border and margins
-
-    The StyleBox is the same one Label draws, so the panel takes a background
-    colour, a border and a content margin the same way. The margin is the gap
-    between the panel's edge and its child, and - unlike a Container's padding -
-    it counts towards the minimum size, because a PanelContainer forced to a
-    smaller size than its margin should shrink its child, not its own frame.
-
-    Only one child is expected. A PanelContainer with several children stretches
-    all of them across the same content rect, which overlaps them; the last one
-    drawn wins the pixels. Use a VBox or HBox inside the panel for more.
-
-    As with every Container, the panel owns the child's position. A PanelContainer
-    moves its child to the content rect and the child then fills it, so a child
-    set to Grow::Both or the FullRect preset spans the panel exactly.
+    Only one child is expected; several are all stretched across the same content
+    rect and overlap. Use a VBox or HBox inside the panel for more.
 */
 class PanelContainer : public Container {
 protected:
-    // Protected rather than private so a subclass can build on the panel instead
-    // of re-deriving it: ScrollView is a PanelContainer whose child is offset
-    // and whose track sits outside this same frame, and both need the content
-    // rect and the box the panel already resolved.
+    // Protected so subclasses (ScrollView) can reuse the resolved box and content rect.
     StyleBox stylebox;
 
-    // The area inside the border and the margins - what the child gets, and what
-    // the minimum size has to make room for. Empty when the panel is too small
-    // to hold anything, which the layout reads as "give the child nothing".
+    // The area inside the border and margins: what the child gets. Empty when the panel is too small.
     Rect panel_content_rect() const;
 
 public:

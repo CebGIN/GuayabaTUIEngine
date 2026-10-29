@@ -3,8 +3,8 @@
 namespace guayaba::detail {
 
 NodeRegistry& NodeRegistry::instance() {
-    // Deliberately leaked: a node in static storage would reach a destroyed
-    // registry from its destructor.
+    // Leaked: a node in static storage would reach a destroyed registry from its
+    // destructor.
     static NodeRegistry* registry = new NodeRegistry();
     return *registry;
 }
@@ -61,8 +61,7 @@ bool NodeRegistry::is_live(uint64_t id) const {
     const uint32_t slot = static_cast<uint32_t>(id & SLOT_MASK);
     if (slot >= slots_.size()) return false;
 
-    // Not resolve() != nullptr: an occupied slot proves some node is there, and
-    // the generation is what proves it is the one this id was minted for.
+    // The generation, not just a non-null slot, is what proves this is the same node.
     const uint32_t generation = static_cast<uint32_t>(id >> SLOT_BITS);
     if (slots_[slot].generation != generation) return false;
 

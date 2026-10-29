@@ -6,22 +6,16 @@
 namespace guayaba {
 
 /*
-    A physical key, not a character.
+    A physical key, not a character. The same key produces a different character
+    with Shift held; the character is on InputEvent::text.
 
-    The distinction is what a text field needs: the same key produces a different
-    character depending on Shift, and a caller who wants the character asks for
-    InputEvent::text rather than for the key. So KEY_A with shift held still reads
-    A, and the 'a' that resulted is on the event as text.
-
-    Letters, digits and space ARE their ASCII codes, so a key can be compared
-    against a character literal:
+    Letters, digits and space are their ASCII codes, so a key compares against a
+    character literal:
 
         if (event.key == 'Q') quit();
 
-    Special keys live above 0x100 so they cannot collide with any ASCII byte.
-
-    Key::NONE is "no key", and is what an event carries when the type is not KEY.
-    It is not the way to ask about any key - the event type answers that.
+    Special keys live above 0x100, clear of any ASCII byte. Key::NONE means no
+    key; ask about which keys an event carries through the event type.
 */
 enum class Key : uint16_t {
     NONE = 0,
@@ -33,15 +27,13 @@ enum class Key : uint16_t {
     A = 0x41, B, C, D, E, F, G, H, I, J, K, L, M,
     N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
 
-    // Everything below is a key with no character of its own, so it must not be
-    // confused with an ASCII byte: 0x100 and up.
+    // Keys with no character of their own, above any ASCII byte.
     ESCAPE = 0x100,
     TAB,
     BACKSPACE,
     ENTER,
 
-    // Cursor movement. The four things a text field and a scrolling list both
-    // need, so they are keys rather than escape sequences every caller sees.
+    // Cursor movement.
     LEFT,
     RIGHT,
     UP,
@@ -55,17 +47,14 @@ enum class Key : uint16_t {
 
     F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
 
-    // Modifier keys. On Windows the console reports these as keys with a press
-    // and a release; on Linux a terminal never reports a standalone Shift/Ctrl/
-    // Alt, so these are delivered only where a sequence carries them. Prefer the
-    // modifier flags on InputEvent, which is what the platform can answer.
+    // Modifier keys. Windows reports these with a press and release; Linux only
+    // where a sequence carries them. Prefer the modifier flags on InputEvent.
     SHIFT,
     CONTROL,
     ALT,
     SUPER,
 
-    // A key this build has no name for. Delivered rather than dropped, so a
-    // terminal with an unrecognised key does not silently eat it.
+    // A key this build has no name for; delivered rather than dropped.
     UNKNOWN,
 };
 

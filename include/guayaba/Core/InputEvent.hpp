@@ -21,28 +21,16 @@ enum class MouseButton : uint8_t {
 };
 
 /*
-    One input occurrence.
+    One input occurrence. A control acting on an event removes it, so the same
+    press cannot reach two controls.
 
-    Events are the consumed view of input: a control acting on one removes it, so
-    the same press cannot reach two controls. Input::mouse_pos and the l_click
-    family stay as the polled view of the same thing, so code that only wants a
-    state ("is the button down") keeps working.
+    Press and release are separate events: a drag is press, motion, release, and
+    `type` plus `pressed` says which half this is. A wheel notch is its own type,
+    carrying its magnitude in wheel_delta.
 
-    PRESS AND RELEASE ARE SEPARATE EVENTS
-    A drag is press, then motion, then release, and a control tracking a drag
-    needs all three. type plus pressed says which half this is.
-
-    THE WHEEL IS ITS OWN TYPE
-    A notch is not pointer movement, and reporting it as one would make every
-    consumer inspect a button field to notice it. wheel_delta carries the
-    magnitude so a fast scroll can be summed by the terminal.
-
-    text IS NOT key
-    For a KEY event, text is the character the press produced - 'a', 'A' with
-    shift, an accented character from the layout - as one codepoint, or 0 for a
-    key that types nothing (arrows, F-keys). A field inserts text; a shortcut
-    compares key. Modifier state is snapshotted per event, so a user releasing
-    Shift before the frame ends cannot change what Shift+A meant.
+    For a KEY event, text is the character the press produced as one codepoint
+    ('a', 'A' with shift), or 0 for a key that types nothing. A field inserts text;
+    a shortcut compares key. Modifier state is snapshotted per event.
 */
 struct InputEvent {
     enum class Type : uint8_t {
@@ -65,17 +53,16 @@ struct InputEvent {
     bool shift = false;
     bool alt = false;
 
-    // The character a KEY press produced, or 0. char32_t, not wchar_t: a Unicode
-    // codepoint is 32 bits everywhere, whereas wchar_t is 2 on Windows.
+    // The character a KEY press produced, or 0. char32_t: a codepoint is 32 bits
+    // everywhere, whereas wchar_t is 2 on Windows.
     char32_t text = 0;
 
     // Only meaningful for MOUSE_BUTTON, MOUSE_MOTION and MOUSE_WHEEL.
     MouseButton mouse_button = MouseButton::NONE;
     Vec2 mouse_pos{};
 
-    // How far the wheel turned, for MOUSE_WHEEL only. Positive is up. A
-    // magnitude rather than a count, because a fast scroll sends several notches
-    // in one report and the consumer wants "scroll twice as far".
+    // How far the wheel turned, for MOUSE_WHEEL only. Positive is up; a magnitude,
+    // since one report can carry several notches.
     int wheel_delta = 0;
 
     bool is_key() const { return type == Type::KEY; }

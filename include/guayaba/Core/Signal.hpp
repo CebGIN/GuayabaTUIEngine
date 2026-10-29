@@ -22,35 +22,24 @@ class Node;
 namespace detail {
 
 /*
-    The shape every Signal<Args...> presents to the name -> signal map.
+    Type-erased base of every Signal<Args...>, so signals of different signatures
+    can live in one name -> signal map. connect() and emit() stay templated on the
+    real argument types; only the storage is erased.
 
-    WHY THE EARS EXISTS
-    A node holds its signals in one heterogeneous map, so the map cannot be typed:
-    "danio" is Signal<int> and "murio" is Signal<void()> and both live under the
-    same owner. So the STORAGE is erased and the PUBLIC SURFACE is not - connect()
-    and emit() stay templated on the real argument types, which is what lets a
-    reactor be an ordinary function or lambda with ordinary parameters.
-
-    The consequence worth stating: a reactor whose parameters do not match is a
-    compile error at the connect call rather than a runtime throw at the emit.
-    Nothing above this line ever sees the arguments, and nothing below it ever
-    has to name them.
-
-    It also carries signature(), so "you declared this name as void(int) and then
-    asked for it as void(double)" can say so instead of reporting a bad cast.
+    signature() reports "void(int, char)" so a name declared with one signature and
+    requested with another can say so.
 */
 class SignalBase {
 public:
     virtual ~SignalBase() = default;
 
-    // "void(int, char)" and friends, built once per instantiation.
+    // e.g. "void(int, char)", built once per instantiation.
     virtual const char* signature() const = 0;
 
     virtual size_t reactor_count() const = 0;
     virtual bool is_connected(uint64_t connection_id) const = 0;
 
-    // Returns whether it changed anything, so an id nobody holds is an answer
-    // rather than a failure.
+    // True if a connection with this id existed and was removed.
     virtual bool disconnect(uint64_t connection_id) = 0;
 
     virtual void clear() = 0;
@@ -59,22 +48,12 @@ public:
 // Monotonic, and 0 is never handed out, so a default-initialised id is invalid.
 uint64_t next_connection_id();
 
-// Declared here and defined in src/Core/Signal.cpp so that this header never needs
-// Node to be a complete type. Taking the pointer by value is the whole trick: a
-// declaration does not dereference it.
+// Declared here and defined in Signal.cpp so this header does not need Node to be
+// complete.
 uint64_t node_id_of(Node* node);
 
-// The node that OWNS A REACTOR, when there is one to ask.
-//
-// A script's owner is always its own node, so a reactor written as a method of a
-// script is owned by that script's node - never by whichever node happens to hold
-// the signal. Getting that backwards is a use-after-free rather than a leak: the
-// signal outlives the reactor, so the reactor keeps being called after the script
-// it belongs to has been destroyed.
-//
-// fallback is what to do when there is no owner to ask: the node whose own signal
-// is being connected to, or INVALID_ID on the bus where no such node is in hand.
-// Anything with get_owner() overrides it and ignores the fallback.
+// The node id that owns a reactor. A type with get_owner() (a Script) reports its
+// own node; anything else returns `fallback` unchanged.
 template<typename T, typename = void>
 struct reactor_owner {
     static uint64_t of(T*, uint64_t fallback) { return fallback; }
@@ -85,8 +64,7 @@ struct reactor_owner<T, std::void_t<decltype(std::declval<T&>().get_owner())>> {
     static uint64_t of(T* subject, uint64_t) { return node_id_of(subject->get_owner()); }
 };
 
-// Builds "void(int, char)". The two packs expand in lockstep, which is why this
-// works at all: Args and I are the same length by construction.
+// Builds the signature string, e.g. "void(int, char)".
 template<typename T>
 std::string type_name() {
     return typeid(T).name();
@@ -94,9 +72,7 @@ std::string type_name() {
 
 template<typename... Args, std::size_t... I>
 std::string make_signature(std::index_sequence<I...>) {
-    // Collected first rather than joined in place: an empty pack then produces
-    // "void()" through the same code path, with no separator logic that only runs
-    // when there is at least one argument.
+    // Collected first so an empty pack still goes through the same join below.
     const std::vector<std::string> parts = { type_name<Args>()... };
 
     std::string out = "void(";
@@ -108,16 +84,12 @@ std::string make_signature(std::index_sequence<I...>) {
     return out;
 }
 
-// Turns any callable into the std::function a signal stores, rejecting one whose
+// Builds the std::function a signal stores from any callable, rejecting one whose
 // parameters do not match at compile time.
 //
-// WHY NOT JUST TAKE std::function<void(Args...)> AS THE PARAMETER
-// Because a parameter pack there is a deduced context, so the compiler tries to
-// deduce the signal's arguments out of the callable itself - and a lambda never
-// matches that deduction, not even when the arguments are spelled out at the call
-// site, because the deduction is attempted anyway. So the callable arrives as a
-// forwarding reference and the std::function is built here, where the types are
-// already known.
+// Takes the callable as a forwarding reference because a parameter pack in a
+// std::function<void(Args...)> parameter is a deduced context, so a lambda would
+// be matched against it instead of being converted.
 template<typename... Args, typename F>
 std::function<void(Args...)> make_reactor(F&& reactor) {
     static_assert(std::is_invocable_v<F&, Args...>,
@@ -130,64 +102,23 @@ std::function<void(Args...)> make_reactor(F&& reactor) {
 } // namespace detail
 
 /*
-    A named event with a list of reactors. emit(args) calls every reactor that is
-    still connected; connect adds one.
+    A named event with a list of reactors. connect() adds one and returns the id
+    that disconnects it; emit(args) calls every reactor still connected.
 
         node->connect_signal<int>("danio", [this](int d){ vida -= d; });
         node->emit_signal("danio", 7);
 
-    WHO OWNS A REACTOR
-    Every connection records the id of the node the reactor belongs to, which is
-    the node you connected from. Before each call that id is resolved against
-    NodeRegistry; if it no longer resolves, the reactor is dropped instead of
-    called.
+    Each connection records the id of the node the reactor belongs to. Before each
+    call that id is resolved against NodeRegistry and the reactor is dropped when
+    it stops resolving, so a connection dies with its owner. A connection made
+    with the default owner id (INVALID_ID) is never dropped automatically and must
+    be disconnected by hand.
 
-    That check is the whole of the auto-disconnect guarantee, and it rests on one
-    invariant that already exists: ~Node calls unregister_node() before any member
-    is destroyed, and every destruction path in the engine arrives there. So the
-    id starts failing at the exact moment the reactor's owner becomes unreachable,
-    which is precisely when calling it would be undefined behaviour. Nothing
-    extra is registered, indexed or destroyed - the tree's own id table does the
-    work. See Core/NodeRegistry.hpp.
-
-    Dropping is lazy in the sense that it costs nothing until something emits: a
-    connection to a dead owner lingers in the list, and the next emit on that
-    signal prunes it. So a frame where nothing is emitted pays nothing at all.
-
-    A connection made with an ownerless connect() has INVALID_ID as its owner and
-    is never dropped automatically. That is the escape hatch for a reactor that
-    owns nothing, and the price is that disconnecting it is your job.
-
-    REENTRANCY
     emit() walks a snapshot of the reactor list, so a reactor may connect,
-    disconnect or free nodes while it runs. The consequences are fixed rather
-    than incidental:
-
-      - Every PERSISTENT reactor connected when emit() began still runs, even if
-        an earlier one disconnected it. There is no "cancelled" flag, matching
-        Godot.
-      - A reactor connected during an emit does NOT run for that emit.
-      - A once-reactor is removed BEFORE being called, so a throwing reactor
-        cannot leave it armed to fire again - and a reactor earlier in the same
-        walk that re-emitted cannot fire it a second time.
-
-    DEAD OWNERS
-    The liveness check happens once, at the top of emit(), and the dead entries
-    are removed there too. That placement is not incidental: a reactor can free
-    the very Signal this method is running in - clear_signals(), SignalBus::clear(),
-    dropping the unique_ptr that owns it - so anything touched after a reactor
-    returns would be a use-after-free. Compacting first means nothing is.
-
-    The cost is one registry resolve per reactor per emit, plus one compaction
-    pass. For an event fired a handful of times a frame that is the right trade
-    for not having to think about reentrancy; for a per-frame fan-out on a hot
-    path, measure it.
-
-    INHERITANCE
-    detail::SignalBase is inherited publicly, which is what lets Node store a
-    Signal<int> and a Signal<void()> in the same map. Nothing outside the engine
-    ever names SignalBase, so the promotion to a common base costs nothing that
-    can be observed.
+    disconnect or free nodes as it runs. A reactor connected during the emit does
+    not run for it, and a once-reactor is removed before it is called. Dead owners
+    are pruned at the top of emit(), before any reactor runs, because a reactor may
+    free the Signal itself.
 */
 template<typename... Args>
 class Signal : public detail::SignalBase {
@@ -196,10 +127,9 @@ public:
 
     // Adds a reactor and returns the id that disconnects it.
     //
-    // owner_id defaults to INVALID_ID, meaning "nobody will drop this for you".
-    // The owner-aware entry point is Node::connect_signal(), which fills it in
-    // with the connecting node's own id - that is the one you normally want, and
-    // it is what a reactor written inside a Script gets automatically.
+    // owner_id is the node the reactor belongs to; it defaults to INVALID_ID,
+    // meaning nobody drops this connection for you. Node::connect_signal() fills
+    // in the connecting node's id.
     uint64_t connect(reactor_type reactor,
                      uint64_t owner_id = detail::NodeRegistry::INVALID_ID,
                      bool once = false) {
@@ -216,28 +146,17 @@ public:
         return connections_.back().id;
     }
 
-    // Calls every live reactor, forwarding the arguments unchanged. A reactor
-    // that does not match this signature does not compile here, which is the
-    // point of keeping the storage erased and the surface typed.
+    // Calls every live reactor, forwarding the arguments unchanged.
     void emit(Args... args) {
-        // Pruned FIRST, and never afterwards. A reactor may call clear_signals(),
-        // drop the node that owns this signal, or reset the unique_ptr that owns
-        // it - any of which frees the object this method is a member of. So the
-        // compaction happens while `this` is still known good, and nothing below
-        // touches the signal after a reactor has run. That is also what makes
-        // is_connected() and reactor_count() honest: they are asked after an emit,
-        // and by then the dead entries are already gone.
+        // Pruned first: a reactor may free this Signal, so nothing may touch
+        // `this` after a reactor has run.
         prune_dead();
 
-        // Copied because a reactor is allowed to mutate this list, and the walk
-        // has to survive it. Connections are a handful of entries in the shapes
-        // this gets used for.
+        // A copy, because a reactor may mutate this list while the walk runs.
         const std::vector<Connection> snapshot = connections_;
 
         for (const Connection& connection : snapshot) {
-            // Once more, because a reactor earlier in this same walk may have
-            // emitted again and consumed it. Without the check a reentrant emit
-            // would fire it twice.
+            // A reentrant emit may have consumed this once-reactor already.
             if (connection.once && !disconnect(connection.id)) continue;
 
             connection.reactor(std::forward<Args>(args)...);
@@ -273,8 +192,7 @@ private:
         reactor_type reactor;
     };
 
-    // One array index plus a compare. INVALID_ID is 0 and is never registered,
-    // so the ownerless case never resolves at all.
+    // INVALID_ID is 0 and never registered, so the ownerless case never resolves.
     static bool is_owner_dead(uint64_t owner_id) {
         if (owner_id == detail::NodeRegistry::INVALID_ID) return false;
         return detail::NodeRegistry::instance().resolve(owner_id) == nullptr;
@@ -297,17 +215,14 @@ private:
 };
 
 /*
-    The name -> signal map, shared by Node and SignalBus so that "declare on
-    demand", "the name is not declared", and "the name has another signature" all
-    mean exactly one thing wherever a signal lives.
+    The name -> signal map, shared by Node and SignalBus.
 
-    owner_label is only ever used to build the message, and it is what tells the
-    two cases apart in a throw: which node, or the bus.
+    owner_label is used only to build error messages (the node's name or "The
+    global signal bus").
 */
 class SignalTable {
 public:
-    // nullptr rather than throwing: the "is it there, is it this shape" question
-    // is a query, the same way get_script_as<S>() is.
+    // nullptr when the name is absent or has another signature.
     template<typename... Args>
     Signal<Args...>* find(const std::string& signal_name) {
         const auto entry = entries_.find(signal_name);
@@ -322,10 +237,8 @@ public:
         return dynamic_cast<Signal<Args...>*>(entry->second.get());
     }
 
-    // Declares on demand. Re-declaring the same shape is not an error and not a
-    // second signal: it hands back the existing one, so callers that race to
-    // declare do not overwrite each other's reactors. A different shape cannot be
-    // reconciled with a live list of reactors, so that throws.
+    // Declares on demand. Re-declaring the same shape returns the existing signal;
+    // a different shape throws.
     template<typename... Args>
     Signal<Args...>& declare(const std::string& signal_name, const std::string& owner_label) {
         const auto entry = entries_.find(signal_name);
@@ -338,23 +251,20 @@ public:
             return *typed;
         }
 
-        // Allocated before insertion and referred to afterwards: the pointee is
-        // stable across the move into the map, so returning it is safe.
+        // The pointee is stable across the move into the map.
         std::unique_ptr<detail::SignalBase> owned(new Signal<Args...>());
         Signal<Args...>* typed = static_cast<Signal<Args...>*>(owned.get());
         entries_.emplace(signal_name, std::move(owned));
         return *typed;
     }
 
-    // nullptr when the name is not declared at all, which is what lets
-    // "declared with another signature" be a different message from "not declared".
+    // nullptr when the name is not declared at all.
     const char* signature_of(const std::string& signal_name) const {
         const auto entry = entries_.find(signal_name);
         return entry == entries_.end() ? nullptr : entry->second->signature();
     }
 
-    // The bus's only handle on a connection is the id, because a bus signal is named
-    // by whoever emits it and not by whoever wants to disconnect from it.
+    // True when any declared signal holds this connection id.
     bool is_connected(uint64_t connection_id) const {
         for (const auto& entry : entries_) {
             if (entry.second->is_connected(connection_id)) return true;
