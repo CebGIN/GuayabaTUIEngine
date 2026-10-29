@@ -172,4 +172,7 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(spinbox tests/spinbox.cpp)
     target_link_libraries(spinbox PRIVATE GuayabaTUIEngine)
+
+    add_executable(split_container tests/split_container.cpp)
+    target_link_libraries(split_container PRIVATE GuayabaTUIEngine)
 endif()
