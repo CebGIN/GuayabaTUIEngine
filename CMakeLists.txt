@@ -169,4 +169,7 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(basic_controls tests/basic_controls.cpp)
     target_link_libraries(basic_controls PRIVATE GuayabaTUIEngine)
+
+    add_executable(spinbox tests/spinbox.cpp)
+    target_link_libraries(spinbox PRIVATE GuayabaTUIEngine)
 endif()
