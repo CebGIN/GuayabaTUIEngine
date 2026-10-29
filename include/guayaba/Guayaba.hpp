@@ -35,6 +35,7 @@
 #include <guayaba/Nodes/Node2D.hpp>
 #include <guayaba/Nodes/NodeTextMatrix.hpp>
 #include <guayaba/Nodes/UI/Button.hpp>
+#include <guayaba/Nodes/UI/CheckBox.hpp>
 #include <guayaba/Nodes/UI/Control.hpp>
 #include <guayaba/Nodes/UI/Container.hpp>
 #include <guayaba/Nodes/UI/Graph.hpp>

@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -316,6 +317,144 @@ void test_spinner_minimum() {
     assert((spinner.get_minimum_size() == Vec2{1, 1}));
 }
 
+// --- CheckBox ---------------------------------------------------------------
+
+InputEvent left_click(Vec2 pos) {
+    InputEvent event;
+    event.type = InputEvent::Type::MOUSE_BUTTON;
+    event.pressed = true;
+    event.mouse_button = MouseButton::LEFT;
+    event.mouse_pos = pos;
+    return event;
+}
+
+InputEvent key_press(Key key) {
+    InputEvent event;
+    event.type = InputEvent::Type::KEY;
+    event.pressed = true;
+    event.key = key;
+    return event;
+}
+
+void draw_checkbox(CheckBox& box, ConsoleRenderer& renderer) {
+    renderer.clear_buffer();
+    box.draw(renderer, Rect::from_size(renderer.get_buffer_size()));
+    renderer.present();
+}
+
+void test_checkbox_click_toggles_and_focuses() {
+    FocusManager::get_instance().clear();
+
+    CheckBox box;
+    box.set_size({10, 1});
+    box.update_layout(Rect::from_size(SCREEN));
+    assert(!box.is_checked());
+
+    std::vector<InputEvent> events{left_click({1, 0})};
+    box.route_input(events);
+
+    assert(box.is_checked());
+    assert(box.is_focused());
+    assert(events.empty());
+
+    FocusManager::get_instance().clear();
+}
+
+void test_checkbox_keyboard_toggles() {
+    FocusManager::get_instance().clear();
+
+    CheckBox box;
+    box.set_size({10, 1});
+    box.update_layout(Rect::from_size(SCREEN));
+    box.grab_focus();
+    assert(box.is_focused());
+
+    std::vector<InputEvent> space{key_press(Key::SPACE)};
+    box.route_input(space);
+    assert(box.is_checked());
+    assert(space.empty());
+
+    std::vector<InputEvent> enter{key_press(Key::ENTER)};
+    box.route_input(enter);
+    assert(!box.is_checked());
+    assert(enter.empty());
+
+    FocusManager::get_instance().clear();
+}
+
+void test_checkbox_signal_only_on_change() {
+    CheckBox box;
+
+    int changes = 0;
+    bool last = true;
+    box.connect_signal<bool>("toggled", [&](bool value) {
+        ++changes;
+        last = value;
+    });
+
+    box.set_checked(true);
+    box.set_checked(true);
+    box.toggle();
+
+    assert(changes == 2);
+    assert(!last);
+}
+
+void test_checkbox_draw_and_minimum() {
+    CheckBox box;
+    box.set_size({7, 1});
+
+    // "[x]" is three columns; the text adds a space plus its own width.
+    assert((box.get_minimum_size() == Vec2{3, 1}));
+
+    CapturingTerminal terminal;
+    ConsoleRenderer renderer(SCREEN, &terminal);
+    box.update_layout(Rect::from_size(SCREEN));
+
+    draw_checkbox(box, renderer);
+    assert(terminal.glyph(0, 0) == L'[');
+    assert(terminal.glyph(1, 0) == L' ');
+    assert(terminal.glyph(2, 0) == L']');
+
+    box.set_checked(true);
+    draw_checkbox(box, renderer);
+    assert(terminal.glyph(1, 0) == L'x');
+
+    box.set_text("abc");
+    assert((box.get_minimum_size() == Vec2{7, 1}));
+    draw_checkbox(box, renderer);
+    assert(terminal.glyph(3, 0) == L' ');
+    assert(terminal.glyph(4, 0) == L'a');
+    assert(terminal.glyph(5, 0) == L'b');
+    assert(terminal.glyph(6, 0) == L'c');
+}
+
+void test_checkbox_custom_glyphs() {
+    CheckBox box;
+    box.set_size({3, 1});
+    box.set_glyphs(U'X', U'.');
+
+    CapturingTerminal terminal;
+    ConsoleRenderer renderer(SCREEN, &terminal);
+    box.update_layout(Rect::from_size(SCREEN));
+
+    box.set_checked(true);
+    draw_checkbox(box, renderer);
+    assert(terminal.glyph(1, 0) == L'X');
+
+    box.set_checked(false);
+    draw_checkbox(box, renderer);
+    assert(terminal.glyph(1, 0) == L'.');
+
+    bool threw = false;
+    try {
+        box.set_glyphs(0, U' ');
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    assert(threw);
+}
+
 } // namespace
 
 int main() {
@@ -333,6 +472,12 @@ int main() {
     test_spinner_invalid_interval_falls_back();
     test_spinner_hidden_does_not_advance();
     test_spinner_minimum();
+
+    test_checkbox_click_toggles_and_focuses();
+    test_checkbox_keyboard_toggles();
+    test_checkbox_signal_only_on_change();
+    test_checkbox_draw_and_minimum();
+    test_checkbox_custom_glyphs();
 
     std::cout << "basic_controls: all checks passed." << std::endl;
     return 0;
