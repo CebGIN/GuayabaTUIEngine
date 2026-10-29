@@ -114,7 +114,7 @@ void test_vbox_end() {
     std::unique_ptr<VBox> root = std::make_unique<VBox>();
     root->set_anchor_preset(AnchorPreset::FullRect);
     root->set_content_alignment(ContentAlignment::End);
-    Control* a = add_vbox_row(*root, {10, 3});
+    add_vbox_row(*root, {10, 3});
     Control* b = add_vbox_row(*root, {10, 3});
 
     root->update_layout(Rect::from_size(SCREEN));
@@ -218,7 +218,7 @@ void test_hbox_end() {
     std::unique_ptr<HBox> root = std::make_unique<HBox>();
     root->set_anchor_preset(AnchorPreset::FullRect);
     root->set_content_alignment(ContentAlignment::End);
-    Control* a = add_hbox_column(*root, {4, 5});
+    add_hbox_column(*root, {4, 5});
     Control* b = add_hbox_column(*root, {4, 5});
 
     root->update_layout(Rect::from_size(SCREEN));

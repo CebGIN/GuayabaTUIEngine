@@ -41,6 +41,68 @@ std::unique_ptr<Node> SceneManager::take_scene() {
     return std::move(root_node);
 }
 
+void SceneManager::apply_pending_scene() {
+    if (!next_scene) return;
+
+    // Before exit_tree, so a control still exists to hear focus_exited.
+    FocusManager::get_instance().clear();
+    if (root_node) root_node->exit_tree();
+    root_node = std::move(next_scene);
+    if (root_node) root_node->enter_tree();
+}
+
+void SceneManager::run_frame(ConsoleRenderer& renderer, std::vector<InputEvent> events) {
+    apply_pending_scene();
+
+    if (!root_node) return;
+
+    renderer.clear_buffer();
+
+    /*
+        Five steps, in this order, and the order is the contract:
+
+          update_layout()  where everything is, knowing that
+          route_input()    who acts on it, against those rects
+          process_scene()  per-frame logic, seeing the result
+          draw()           the picture
+
+        Routing hit-tests, so layout must precede it: a control that resized this
+        frame is tested against the size it will be drawn at. Input precedes
+        update, so a control that acted on a key has done so before a script reads
+        its state in the same frame.
+    */
+
+    // After the caller's resize, so Controls measure against the buffer size
+    // about to be painted.
+    this->root_node->update_layout(Rect::from_size(renderer.get_buffer_size()));
+
+    this->root_node->route_input(events);
+
+    // Whatever nobody consumed, offered to scripts and to the bus as the
+    // unhandled fallback.
+    if (!events.empty()) {
+        SignalBus& bus = SignalBus::get_instance();
+        const bool bus_listens = bus.is_declared("unhandled_input");
+        for (const InputEvent& event : events) {
+            this->root_node->route_unhandled_input(event);
+            if (bus_listens) bus.emit_signal("unhandled_input", event);
+        }
+    }
+
+    this->process_scene();
+
+    // The clip starts as the whole buffer, and narrows from there as it passes
+    // down through any Control that clips.
+    this->root_node->draw(renderer, Rect::from_size(renderer.get_buffer_size()));
+
+    // Last, so a node queued by on_process still draws its final frame and is
+    // gone before the next frame starts.
+    detail::drain_pending_deletions();
+
+    renderer.present();
+    increase_frame_count();
+}
+
 void SceneManager::start_running() {
     this->is_running = true;
 
@@ -69,70 +131,19 @@ void SceneManager::start_running() {
         // Taken once per frame, from the same clock the budget below uses.
         const auto frame_start = std::chrono::steady_clock::now();
 
-        // Scene change.
-        if (next_scene){
-            // Before exit_tree, so a control still exists to hear focus_exited.
-            FocusManager::get_instance().clear();
-            if (root_node) root_node->exit_tree();
-            root_node = std::move(next_scene);
-            if (root_node) root_node->enter_tree();
-        }
+        // Applied before polling input, so a scene that entered this frame is
+        // already listening to the bus signals refresh_input() emits.
+        apply_pending_scene();
 
         if (this->is_running && this->root_node) {
-
             renderer.resize(os_terminal->get_screen_size(renderer.get_buffer_size()));
-            renderer.clear_buffer();
-
-            /*
-                Five steps, in this order, and the order is the contract:
-
-                  refresh_input()  what the user did this frame
-                  update_layout()  where everything is, knowing that
-                  route_input()    who acts on it, against those rects
-                  process_scene()  per-frame logic, seeing the result
-                  draw()           the picture
-
-                Routing hit-tests, so layout must precede it: a control that
-                resized this frame is tested against the size it will be drawn
-                at. Input precedes update, so a control that acted on a key has
-                done so before a script reads its state in the same frame.
-            */
             Input::refresh_input();
-
-            // Held in a local: route_input takes the vector by reference so a
-            // control can erase a consumed event.
-            std::vector<InputEvent> events = Input::drain_input_events();
-
-            // After the resize above, so Controls measure against the buffer size
-            // about to be painted.
-            this->root_node->update_layout(Rect::from_size(renderer.get_buffer_size()));
-
-            this->root_node->route_input(events);
-
-            // Whatever nobody consumed, offered to scripts and to the bus as the
-            // unhandled fallback.
-            if (!events.empty()) {
-                SignalBus& bus = SignalBus::get_instance();
-                const bool bus_listens = bus.is_declared("unhandled_input");
-                for (const InputEvent& event : events) {
-                    this->root_node->route_unhandled_input(event);
-                    if (bus_listens) bus.emit_signal("unhandled_input", event);
-                }
-            }
-
-            this->process_scene();
-
-            // The clip starts as the whole buffer, and narrows from there as
-            // it passes down through any Control that clips.
-            this->root_node->draw(renderer, Rect::from_size(renderer.get_buffer_size()));
-
-            // Last, so a node queued by on_process still draws its final frame
-            // and is gone before the next frame starts.
-            detail::drain_pending_deletions();
-
-            renderer.present();
-            increase_frame_count();
         }
+
+        // The rest of the frame lives here: clear, layout, routing, update, draw
+        // and present. The events are taken once and handed over by value, so a
+        // control can erase the ones it consumed.
+        run_frame(renderer, Input::drain_input_events());
 
         /*
             Spend whatever is left of the frame's budget waiting. Placed after

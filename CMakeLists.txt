@@ -11,6 +11,19 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# --- Sanitizers (opt-in) ------------------------------------------------------------
+# Instruments the library and the tests. GCC/Clang only: MSVC has no equivalent
+# spelling, and silently ignoring the option would hide that.
+option(GUAYABA_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
+if(GUAYABA_SANITIZE)
+    if(MSVC)
+        message(FATAL_ERROR "GUAYABA_SANITIZE is only supported with GCC and Clang.")
+    endif()
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
 # Compilation database for IntelliSense (cpptools, CLion, clangd, vim).
 # Only when this project is the top-level one: the variable applies to the whole
 # build tree, so enabling it unconditionally would hand a compile_commands.json
@@ -107,6 +120,14 @@ install(FILES
 option(GUAYABA_BUILD_TESTS "Build GuayabaTUIEngine's headless layout tests" OFF)
 
 if(GUAYABA_BUILD_TESTS)
+    # Warnings only on the tests: the library stays as it was, and nothing here
+    # is -Werror, so a stricter compiler does not break the build.
+    if(MSVC)
+        add_compile_options(/W4)
+    else()
+        add_compile_options(-Wall -Wextra)
+    endif()
+
     add_executable(layout_alignment tests/layout_alignment.cpp)
     target_link_libraries(layout_alignment PRIVATE GuayabaTUIEngine)
 
@@ -127,4 +148,7 @@ if(GUAYABA_BUILD_TESTS)
 
     add_executable(text_rendering tests/text_rendering.cpp)
     target_link_libraries(text_rendering PRIVATE GuayabaTUIEngine)
+
+    add_executable(frame_order tests/frame_order.cpp)
+    target_link_libraries(frame_order PRIVATE GuayabaTUIEngine)
 endif()

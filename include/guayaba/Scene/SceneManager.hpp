@@ -3,13 +3,16 @@
 
 #include <chrono>
 #include <memory>
+#include <vector>
 
+#include <guayaba/Core/InputEvent.hpp>
 #include <guayaba/Core/NodeRef.hpp>
 #include <guayaba/Core/Vec2.hpp>
 #include <guayaba/Terminal/IOSTerminal.hpp>
 
 namespace guayaba {
 
+class ConsoleRenderer;
 class Node;
 
 /*
@@ -28,7 +31,10 @@ class SceneManager {
         SceneManager(const SceneManager&) = delete;
         SceneManager& operator=(const SceneManager&) = delete;
 
-        std::chrono::high_resolution_clock::time_point m_lastTime;
+        // Stamped at construction so a run_frame() driven by tests, without
+        // start_running(), does not report a delta measured from the epoch.
+        std::chrono::high_resolution_clock::time_point m_lastTime =
+            std::chrono::high_resolution_clock::now();
         double m_deltaTime = 0.0;
 
         unsigned long int frame_count = 0;
@@ -40,10 +46,30 @@ class SceneManager {
 
         std::unique_ptr<IOSTerminal> os_terminal;
 
+        // Applies a pending change_scene(), if any. Separated from run_frame() so
+        // start_running() can apply it before polling the terminal, which is the
+        // order the loop has always used.
+        void apply_pending_scene();
+
     public:
         static SceneManager& get_instance();
 
         void process_scene();
+
+        /*
+            Runs one frame against a renderer and a set of events the caller owns.
+
+            This is the body of the loop, minus the terminal: it applies a pending
+            scene change, clears the buffer, lays out, routes the events, updates,
+            draws, drains queued deletions and presents. The terminal-specific
+            parts - polling input, resizing the buffer against the physical screen,
+            and the frame-rate sleep - stay in start_running().
+
+            Public so tests can drive frames headlessly with synthesized events.
+            When there is no scene after applying the change, the call does
+            nothing: no layout, no present, no frame_count.
+        */
+        void run_frame(ConsoleRenderer& renderer, std::vector<InputEvent> events);
 
 // Non-owning. Empty once the scene is gone - including when the scene is
     // swapped out from under a handle you were holding.
